@@ -1,6 +1,5 @@
 package br.ufms.jogai.domain.usuario;
 
-import br.ufms.jogai.domain.AI.reserva.Reserva;
 import br.ufms.jogai.domain.shared.Entidade;
 import br.ufms.jogai.domain.util.Validar;
 
@@ -35,8 +34,8 @@ public class Usuario extends Entidade<UUID> {
         setTelefone(telefone);
         setDataNascimento(dataNascimento);
 
-        this.dataCadastro = Objects.requireNonNull(dataCadastro, "data de cadastro não pode ser nula");
-        this.status = Objects.requireNonNull(status, "status do usuário não pode ser nulo");
+        this.dataCadastro = Objects.requireNonNull(dataCadastro, "A data de cadastro não pode ser nula");
+        this.status = Objects.requireNonNull(status, "O status do usuário não pode ser nulo");
     }
 
     public String getNome() {
@@ -71,16 +70,21 @@ public class Usuario extends Entidade<UUID> {
         this.dataNascimento = Validar.dataNascimento(dataNascimento, true);
     }
 
-    public int getIdade() {
+    public static int idade(LocalDate dataNascimento) {
+        Objects.requireNonNull(dataNascimento, "A data de nascimento não pode ser nula");
         return Period.between(dataNascimento, LocalDate.now()).getYears();
     }
 
-    public boolean temIdadeIgualOuMaiorQue(int idade) {
-        return getIdade() >= idade;
+    public static boolean idadeIgualOuMaiorQue(LocalDate dataNascimento, int idade) {
+        return idade(dataNascimento) >= idade;
+    }
+
+    public int getIdade() {
+        return idade(dataNascimento);
     }
 
     public boolean isMaiorIdade() {
-        return temIdadeIgualOuMaiorQue(18);
+        return idadeIgualOuMaiorQue(dataNascimento, 18);
     }
 
     public Instant getDataCadastro() {
