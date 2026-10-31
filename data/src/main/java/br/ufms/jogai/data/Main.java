@@ -30,7 +30,7 @@ public class Main {
                     })
                     .get();
 
-            repository.cadastrar(usuario)
+            repository.create(usuario)
                     .thenAccept(u -> IO.println(u.getNome() + " inserido com sucesso"))
                     .get();
 

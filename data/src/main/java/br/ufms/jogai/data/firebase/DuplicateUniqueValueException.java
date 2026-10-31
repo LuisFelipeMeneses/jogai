@@ -1,4 +1,4 @@
-package br.ufms.jogai.data.repository;
+package br.ufms.jogai.data.firebase;
 
 /**
  * Infrastructure conflict that an entity repository may translate into a domain exception.

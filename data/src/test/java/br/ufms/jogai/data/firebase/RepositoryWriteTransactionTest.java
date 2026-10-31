@@ -4,7 +4,6 @@ import br.ufms.jogai.data.exemplo.CategoriaExemplo;
 import br.ufms.jogai.data.exemplo.CategoriaExemploRepository;
 import br.ufms.jogai.data.exemplo.RegistrationExampleRepository;
 import br.ufms.jogai.data.repository.UsuarioFirestoreRepository;
-import br.ufms.jogai.data.repository.DuplicateUniqueValueException;
 import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
 import com.google.cloud.firestore.Firestore;

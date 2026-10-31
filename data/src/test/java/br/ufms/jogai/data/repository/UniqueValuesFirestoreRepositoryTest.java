@@ -1,5 +1,6 @@
 package br.ufms.jogai.data.repository;
 
+import br.ufms.jogai.data.firebase.DuplicateUniqueValueException;
 import br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;

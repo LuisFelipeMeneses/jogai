@@ -10,12 +10,6 @@ import java.util.concurrent.CompletableFuture;
 
 public interface UsuarioRepository extends Repository<Usuario, UUID> {
 
-    /** Cadastra um novo usuário, rejeitando id, email ou telefone já utilizados. */
-    CompletableFuture<Usuario> cadastrar(Usuario usuario);
-
-    /** Cadastra todos os usuários ou rejeita o lote inteiro em caso de conflito. */
-    CompletableFuture<Collection<Usuario>> cadastrarTodos(Collection<Usuario> usuarios);
-
     CompletableFuture<Page<Usuario, UUID>> listarPorNome(String nome, int pageSize, UUID afterId);
 
     default CompletableFuture<Page<Usuario, UUID>> listarPorNome(String nome, int pageSize) {
