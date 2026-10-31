@@ -22,8 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -57,16 +56,20 @@ import java.util.concurrent.ForkJoinPool;
  * and local SDK validation may throw synchronously. This repository does not own or close the
  * supplied {@link Firestore} client. Existing storage names are preserved for compatibility.
  *
- * @param <E> the domain entity type
+ * @param <E>  the domain entity type
  * @param <ID> the entity identifier type; its String representation must be a valid document ID
  */
 public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Serializable>
         implements Repository<E, ID> {
 
-    /** Shared Firestore client owned by the application. */
+    /**
+     * Shared Firestore client owned by the application.
+     */
     protected final Firestore db;
 
-    /** Collection containing the entity documents. */
+    /**
+     * Collection containing the entity documents.
+     */
     protected final CollectionReference collection;
 
     private final String scope;
@@ -90,17 +93,19 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
      * stable and exclusive to this entity collection. An empty field set disables reservations.
      * For example: {@code super(db.collection("accounts"), "account", Set.of("email"))}.
      *
-     * @param collection the non-null entity collection
-     * @param scope the non-blank uniqueness namespace
+     * @param collection   the non-null entity collection
+     * @param scope        the non-blank uniqueness namespace
      * @param uniqueFields required String fields, using the names produced by {@code entityToMap}
      * @throws IllegalArgumentException if the scope or a reservation key component is blank
-     * @throws NullPointerException if an argument or a field name is null
+     * @throws NullPointerException     if an argument or a field name is null
      */
     protected FirestoreRepository(CollectionReference collection, String scope, Set<String> uniqueFields) {
         this.collection = Objects.requireNonNull(collection, "Collection must not be null");
         this.db = collection.getFirestore();
         this.scope = Objects.requireNonNull(scope, "Scope must not be null");
-        if (scope.isBlank()) throw new IllegalArgumentException("Scope must not be blank");
+        if (scope.isBlank()) {
+            throw new IllegalArgumentException("Scope must not be blank");
+        }
         this.uniqueFields = Set.copyOf(Objects.requireNonNull(uniqueFields, "Unique fields must not be null"));
         this.uniqueValues = new UniqueValuesFirestoreRepository(db);
         this.initializationMarker = uniqueValues.initializationMarker(collection.getPath(), scope, this.uniqueFields);
@@ -135,7 +140,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
         Objects.requireNonNull(entity, "Entity must not be null");
         String id = idToStr(entity.getId());
         // Capture once so every transaction attempt uses the same canonical values.
-        Map<String, Object> capturedData = Collections.unmodifiableMap(new LinkedHashMap<>(entityToMap(entity)));
+        Map<String, Object> capturedData = captureEntityData(entity);
         Map<String, String> currentValues = extractUniqueValues(capturedData);
         E resultEntity = mapToEntity(id, capturedData);
         DocumentReference reference = collection.document(id);
@@ -151,13 +156,15 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
 
         return toCompletableFuture(db.runTransaction(transaction -> {
             var previous = transaction.get(reference).get();
-            if (createOnly && previous.exists()) throw duplicateValueException("id");
+            if (createOnly && previous.exists()) {
+                throw duplicateValueException("id");
+            }
             var reservations = uniqueValues.inTransaction(transaction);
             boolean initialize;
             try {
                 initialize = prepareInitialization(transaction, reservations);
-                reservations.replace(scope, id,
-                        previous.exists() ? extractUniqueValues(previous) : Map.of(), currentValues);
+                reservations.replace(scope, id, previous.exists() ?
+                        extractUniqueValues(previous) : Map.of(), currentValues);
             } catch (DuplicateUniqueValueException conflict) {
                 throw duplicateValueException(conflict.getField());
             }
@@ -188,9 +195,11 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
         if (uniqueFields.isEmpty()) {
             return toCompletableFuture(reference.delete()).thenApply(result -> null);
         }
-        return toCompletableFuture(db.<Void>runTransaction(transaction -> {
+        return toCompletableFuture(db.runTransaction(transaction -> {
             var document = transaction.get(reference).get();
-            if (!document.exists()) return null;
+            if (!document.exists()) {
+                return null;
+            }
             var reservations = uniqueValues.inTransaction(transaction);
             reservations.replace(scope, entityId, extractUniqueValues(document), Map.of());
             reservations.apply();
@@ -201,25 +210,39 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
 
     private boolean prepareInitialization(Transaction transaction, UniqueValuesFirestoreRepository.Operation reservations)
             throws ExecutionException, InterruptedException {
-        if (transaction.get(initializationMarker).get().exists()) return false;
+        if (transaction.get(initializationMarker).get().exists()) {
+            return false;
+        }
         // Prepare every reservation before scheduling any writes, including the marker itself.
         for (var document : transaction.get(collection).get().getDocuments()) {
-            for (var field : extractUniqueValues(document).entrySet()) {
-                reservations.reserve(scope, field.getKey(), field.getValue(), document.getId());
-            }
+            reservations.replace(scope, document.getId(), Map.of(), extractUniqueValues(document));
         }
         return true;
     }
 
+    private Map<String, Object> captureEntityData(E entity) {
+        Map<String, Object> data = Objects.requireNonNull(entityToMap(entity), "Entity data must not be null");
+        for (Object value : data.values()) {
+            if (value == null) {
+                // Map.copyOf rejects nulls; preserve optional fields with a defensive snapshot.
+                return Map.copyOf(data);
+            }
+        }
+        // The JDK can reuse an immutable source map; mutable maps are defensively copied.
+        return Map.copyOf(data);
+    }
+
     private Map<String, String> extractUniqueValues(Map<String, Object> data) {
-        Map<String, String> values = new LinkedHashMap<>();
+        if (uniqueFields.isEmpty()) return Map.of();
+        Map<String, String> values = HashMap.newHashMap(uniqueFields.size());
         uniqueFields.forEach(field -> {
             if (!(data.get(field) instanceof String value)) {
                 throw new IllegalArgumentException("Unique field " + field + " must be a required String");
             }
             values.put(field, value);
         });
-        return Map.copyOf(values);
+        // This map stays private to the persistence flow; no second copy is needed.
+        return values;
     }
 
     private Map<String, String> extractUniqueValues(DocumentSnapshot document) {
@@ -236,7 +259,9 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     protected CompletableFuture<Optional<E>> get(DocumentReference reference) {
         Objects.requireNonNull(reference, "Document reference must not be null");
         return toCompletableFuture(reference.get())
-                .thenApply(document -> document.exists() ? Optional.of(documentToEntity(document)) : Optional.empty());
+                .thenApply(document -> document.exists() ?
+                        Optional.of(documentToEntity(document)) :
+                        Optional.empty());
     }
 
     /**
@@ -280,7 +305,10 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     protected CompletableFuture<Optional<E>> queryOne(Query query) {
         Objects.requireNonNull(query, "Query must not be null");
         return toCompletableFuture(query.limit(1).get())
-                .thenApply(snapshot -> snapshot.getDocuments().stream().findFirst().map(this::documentToEntity));
+                .thenApply(snapshot -> {
+                    var documents = snapshot.getDocuments();
+                    return documents.isEmpty() ? Optional.empty() : Optional.of(documentToEntity(documents.getFirst()));
+                });
     }
 
     /**
@@ -361,7 +389,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
      * Cancellation of the returned future is not propagated to the source future.
      *
      * @param apiFuture the source asynchronous operation
-     * @param <T> the result type
+     * @param <T>       the result type
      * @return the adapted future
      */
     protected <T> CompletableFuture<T> toCompletableFuture(ApiFuture<T> apiFuture) {
@@ -414,7 +442,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     /**
      * Reconstructs an independent domain entity for reads and captured write results.
      *
-     * @param id the document ID to preserve
+     * @param id   the document ID to preserve
      * @param data the persisted or captured data; this map may be unmodifiable
      * @return a non-null entity whose construction enforces domain invariants
      * <p><strong>Implementation contract:</strong> Do not mutate the supplied map or generate a new ID. Reconstruct mutable nested

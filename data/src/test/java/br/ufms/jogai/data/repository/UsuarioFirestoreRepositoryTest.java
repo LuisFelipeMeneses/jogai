@@ -67,6 +67,85 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     @Test
+    void reservaSemProprietarioNaoEhConfundidaComDocumentoAusenteNaLeituraProjetada() throws Exception {
+        Usuario a = usuario("a@example.com", "67996122809");
+        aguardar(repository.cadastrar(a));
+        var email = db.collection("valores_unicos").whereEqualTo("campo", "email")
+                .get().get().getDocuments().getFirst();
+        email.getReference().update("entidadeId", com.google.cloud.firestore.FieldValue.delete()).get();
+        a.setNome("Outro Nome");
+        duplicado("email", repository.save(a));
+        assertEquals("Pessoa Exemplo", aguardar(repository.get(a.getId())).orElseThrow().getNome());
+        assertNull(email.getReference().get().get().getString("entidadeId"));
+        assertEquals(2, db.collection("valores_unicos").get().get().size());
+    }
+
+    @Test
+    void variosCadastrosConcorrentesNaoDuplicamEmailNemDeixamReservasOrfas() throws Exception {
+        Usuario inicial = usuario("inicial@example.com", "67996122819");
+        aguardar(repository.cadastrar(inicial));
+        aguardar(repository.delete(inicial.getId()));
+        var resultados = new java.util.ArrayList<CompletableFuture<Throwable>>();
+        for (int i = 0; i < 6; i++) {
+            resultados.add(repository.cadastrar(usuario("disputa@example.com", "6799612280" + i))
+                    .handle((usuario, erro) -> erro));
+        }
+        int concluidos = 0;
+        for (var resultado : resultados) {
+            Throwable erro = aguardar(resultado);
+            if (erro == null) concluidos++;
+            else assertEquals("email", assertInstanceOf(UsuarioDuplicadoException.class, causa(erro)).getCampo());
+        }
+        assertEquals(1, concluidos);
+        assertEquals(1, aguardar(repository.getAll()).size());
+        assertReservasConsistentes();
+    }
+
+    @Test
+    void alterarSomenteNomeNaoRegravaReservasNemControle() throws Exception {
+        Usuario a = usuario("a@example.com", "67996122809");
+        aguardar(repository.cadastrar(a));
+        var reservasAntes = db.collection("valores_unicos").get().get().getDocuments();
+        var controleAntes = db.collection("valores_unicos_controle").get().get().getDocuments().getFirst();
+
+        a.setNome("Outro Nome");
+        aguardar(repository.save(a));
+
+        assertEquals("Outro Nome", aguardar(repository.get(a.getId())).orElseThrow().getNome());
+        for (var reserva : reservasAntes) {
+            assertEquals(reserva.getUpdateTime(), reserva.getReference().get().get().getUpdateTime(),
+                    "Uma reserva inalterada não deve ser regravada");
+        }
+        assertEquals(controleAntes.getUpdateTime(), controleAntes.getReference().get().get().getUpdateTime());
+        assertReservasConsistentes();
+    }
+
+    @Test
+    void alterarEmailNaoRegravaReservaDoTelefone() throws Exception {
+        Usuario a = usuario("a@example.com", "67996122809");
+        aguardar(repository.cadastrar(a));
+        var telefoneAntes = db.collection("valores_unicos").whereEqualTo("campo", "telefone")
+                .get().get().getDocuments().getFirst();
+        a.setEmail("novo@example.com");
+        aguardar(repository.save(a));
+        assertEquals(telefoneAntes.getUpdateTime(), telefoneAntes.getReference().get().get().getUpdateTime());
+        assertReservasConsistentes();
+        aguardar(repository.cadastrar(usuario("a@example.com", "67996122810")));
+    }
+
+    @Test
+    void salvarValorInalteradoAindaRecriaReservaAusente() throws Exception {
+        Usuario a = usuario("a@example.com", "67996122809");
+        aguardar(repository.cadastrar(a));
+        var telefone = db.collection("valores_unicos").whereEqualTo("campo", "telefone")
+                .get().get().getDocuments().getFirst();
+        telefone.getReference().delete().get();
+        aguardar(repository.save(a));
+        assertReservasConsistentes();
+        duplicado("telefone", repository.cadastrar(usuario("b@example.com", "67996122809")));
+    }
+
+    @Test
     void atualizacaoLiberaReservasAnteriores() throws Exception {
         Usuario usuario = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(usuario));

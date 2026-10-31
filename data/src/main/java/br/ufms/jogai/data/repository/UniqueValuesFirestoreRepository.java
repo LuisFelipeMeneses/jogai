@@ -3,11 +3,13 @@ package br.ufms.jogai.data.repository;
 import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
+import com.google.cloud.firestore.FieldMask;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.Transaction;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -22,6 +24,9 @@ import java.util.stream.Stream;
  * are retained for storage compatibility; Base64 encoding is reversible, not encryption.
  */
 public final class UniqueValuesFirestoreRepository {
+
+    private static final Base64.Encoder KEY_ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final FieldMask OWNER_MASK = FieldMask.of("entidadeId");
 
     private final CollectionReference collection;
 
@@ -56,7 +61,7 @@ public final class UniqueValuesFirestoreRepository {
 
     private DocumentReference reference(String scope, String field, String value) {
         // Encode each component separately to avoid ambiguous reservation keys.
-        return collection.document(key(Stream.of(scope, field, value)));
+        return collection.document(encode(scope) + "." + encode(field) + "." + encode(value));
     }
 
     private static String key(Stream<String> parts) {
@@ -67,7 +72,7 @@ public final class UniqueValuesFirestoreRepository {
         if (Objects.requireNonNull(value).isBlank()) {
             throw new IllegalArgumentException("Reservation key components must not be blank");
         }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+        return KEY_ENCODER.encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private record Reservation(String scope, String field, String entityId) {
@@ -93,6 +98,8 @@ public final class UniqueValuesFirestoreRepository {
 
         /**
          * Checks all new values before preparing the release of changed previous values.
+         * Uncached reservation documents are fetched together inside the transaction, returning
+         * only their owner field. Missing documents and missing owner fields remain distinguishable.
          * @param scope the unique namespace
          * @param entityId the reservation owner's ID
          * @param previousValues previously persisted canonical values
@@ -104,6 +111,23 @@ public final class UniqueValuesFirestoreRepository {
         public void replace(String scope, String entityId,
                                Map<String, String> previousValues, Map<String, String> currentValues)
                 throws ExecutionException, InterruptedException {
+            checkNotApplied();
+            Objects.requireNonNull(entityId);
+            if (currentValues.isEmpty() && previousValues.isEmpty()) return;
+            Set<DocumentReference> references = HashSet.newHashSet(currentValues.size() + previousValues.size());
+            currentValues.forEach((field, value) -> references.add(reference(scope, field, value)));
+            previousValues.forEach((field, value) -> {
+                if (!Objects.equals(value, currentValues.get(field))) {
+                    references.add(reference(scope, field, value));
+                }
+            });
+            references.removeAll(readDocuments.keySet());
+            if (!references.isEmpty()) {
+                // Batch reads retain transaction conflict detection, including for missing documents.
+                for (var document : transaction.getAll(references.toArray(DocumentReference[]::new), OWNER_MASK).get()) {
+                    readDocuments.put(document.getReference(), document);
+                }
+            }
             for (var field : currentValues.entrySet()) {
                 reserve(scope, field.getKey(), field.getValue(), entityId);
             }
@@ -135,7 +159,13 @@ public final class UniqueValuesFirestoreRepository {
                     || (pending != null && !entityId.equals(pending.entityId()))) {
                 throw new DuplicateUniqueValueException(field);
             }
-            pendingChanges.put(reference, new Reservation(scope, field, entityId));
+            if (existing.exists()) {
+                // Ownership was verified by a transactional read: do not rewrite an unchanged reservation.
+                // Also cancel any release scheduled earlier in this operation.
+                pendingChanges.remove(reference);
+            } else if (pending == null) {
+                pendingChanges.put(reference, new Reservation(scope, field, entityId));
+            }
         }
 
         /**

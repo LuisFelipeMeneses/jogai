@@ -112,3 +112,17 @@ A API genérica usa inglês: `create` cria documentos novos e
 auxiliar usa `UniqueValuesFirestoreRepository` e `DuplicateUniqueValueException`;
 esta última expõe `getField()`. A exceção de domínio continua expondo `getCampo()`.
 Os nomes já persistidos em coleções, chaves e campos permanecem compatíveis.
+
+## Desempenho
+
+A análise de operações, memória e limitações de consultas está em
+[Persistence performance and correctness](docs/persistence-performance.md).
+Reservas já pertencentes à entidade continuam sendo verificadas, mas não são
+regravadas. Os testes verificam isso pelo `updateTime` persistido, sem remover
+as garantias de concorrência ou de recuperação de reservas ausentes.
+
+As leituras de reservas em cada substituição são agrupadas em `getAll` dentro da
+transação, solicitando somente o campo do proprietário. Isso reduz chamadas
+sequenciais e dados transferidos, mantendo o número de documentos verificados e
+a proteção contra conflitos. A suíte inclui seis cadastros simultâneos para o
+mesmo email e a rejeição de uma reserva existente sem proprietário.
