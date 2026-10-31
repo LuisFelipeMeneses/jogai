@@ -2,8 +2,10 @@ package br.ufms.jogai.data;
 
 import br.ufms.jogai.data.repository.UsuarioFirestoreRepository;
 import br.ufms.jogai.domain.usuario.Usuario;
+import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
 
 import java.time.LocalDate;
+import java.util.concurrent.ExecutionException;
 
 public class Main {
 
@@ -18,7 +20,7 @@ public class Main {
                     LocalDate.of(1988, 12, 8)
             );
 
-            repository.save(usuario)
+            repository.cadastrar(usuario)
                     .thenAccept(u -> IO.println(u.getNome() + " inserido com sucesso"))
                     .get();
 
@@ -53,6 +55,12 @@ public class Main {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             System.err.println("Operação interrompida.");
+        } catch (ExecutionException e) {
+            Throwable causa = e;
+            while (causa.getCause() != null && !(causa instanceof UsuarioDuplicadoException)) {
+                causa = causa.getCause();
+            }
+            System.err.println(causa.getMessage());
         } catch (Exception e) {
             System.err.println(e.getMessage());
         }

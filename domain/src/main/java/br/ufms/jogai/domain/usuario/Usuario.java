@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.util.Objects;
+import java.util.Locale;
 import java.util.UUID;
 
 public class Usuario extends Entidade<UUID> {
@@ -51,7 +52,7 @@ public class Usuario extends Entidade<UUID> {
     }
 
     public void setEmail(String email) {
-        this.email = Validar.email(email, true);
+        this.email = Validar.email(Objects.requireNonNull(email).strip(), true).toLowerCase(Locale.ROOT);
     }
 
     public String getTelefone() {
@@ -124,6 +125,19 @@ public class Usuario extends Entidade<UUID> {
         );
     }
 
+    /**
+     * Reconstrói o objeto.
+     *
+     * @param id id
+     * @param nome nome
+     * @param email email
+     * @param telefone telefone
+     * @param dataNascimento data de nascimento
+     * @param dataCadastro data de cadastro
+     * @param status status
+     *
+     * @return o objeto Usuario
+     */
     public static Usuario reconstitute(
             UUID id,
             String nome,

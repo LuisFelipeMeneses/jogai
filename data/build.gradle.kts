@@ -13,6 +13,9 @@ dependencies {
 
     // The runnable data-layer example needs an SLF4J 2.x provider at runtime.
     runtimeOnly(libs.slf4j.simple)
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.12.2")
 }
 
 tasks.withType<JavaExec>().configureEach {

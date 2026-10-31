@@ -1,6 +1,5 @@
 package br.ufms.jogai.data.firebase;
 
-import br.ufms.jogai.data.firebase.config.FirebaseConfig;
 import br.ufms.jogai.domain.shared.Entidade;
 import br.ufms.jogai.domain.shared.Repository;
 
@@ -21,18 +20,18 @@ import java.util.concurrent.ForkJoinPool;
 public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Serializable>
         implements Repository<E, ID> {
 
-    protected static final Firestore db = FirebaseConfig.getFirestore();
+    protected final Firestore db;
 
     protected final CollectionReference collection;
 
     protected FirestoreRepository(CollectionReference collection) {
         this.collection = Objects.requireNonNull(collection);
+        this.db = collection.getFirestore();
     }
 
     @Override
     public CompletableFuture<E> save(E entity) {
-        Objects.requireNonNull(entity);
-
+        Objects.requireNonNull(entity, "A entidade não pode ser nula");
         ID id = Objects.requireNonNull(entity.getId(), "A entidade deve possuir um identificador");
 
         DocumentReference docRef = collection.document(idToStr(id));
@@ -42,9 +41,8 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     protected DocumentReference save(Transaction transaction, E entity) {
-
-        Objects.requireNonNull(transaction);
-        Objects.requireNonNull(entity);
+        Objects.requireNonNull(transaction, "A transação não pode ser nula");
+        Objects.requireNonNull(entity, "A entidade não pode ser nula");
 
         ID id = Objects.requireNonNull(entity.getId(), "A entidade deve possuir um identificador");
 
@@ -57,7 +55,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
 
     @Override
     public CompletableFuture<Void> delete(ID id) {
-        Objects.requireNonNull(id);
+        Objects.requireNonNull(id, "O id não pode ser nulo");
 
         DocumentReference docRef = collection.document(idToStr(id));
 
@@ -66,14 +64,14 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     protected void delete(Transaction transaction, ID id) {
-        Objects.requireNonNull(transaction);
-        Objects.requireNonNull(id);
+        Objects.requireNonNull(transaction, "A transação não pode ser nula");
+        Objects.requireNonNull(id, "O id não pode ser nulo");
 
         transaction.delete(collection.document(idToStr(id)));
     }
 
     protected CompletableFuture<Optional<E>> get(DocumentReference docRef) {
-        Objects.requireNonNull(docRef);
+        Objects.requireNonNull(docRef, "A referência ao documento não pode ser nula");
 
         return toCompletableFuture(docRef.get())
                 .thenApply(document -> {
@@ -86,7 +84,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
 
     @Override
     public CompletableFuture<Optional<E>> get(ID id) {
-        Objects.requireNonNull(id);
+        Objects.requireNonNull(id, "O id não pode ser nulo");
 
         return get(collection.document(idToStr(id)));
     }
@@ -97,14 +95,14 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     protected CompletableFuture<Collection<E>> query(Query query) {
-        Objects.requireNonNull(query);
+        Objects.requireNonNull(query, "A query não pode ser nula");
 
         return toCompletableFuture(query.get())
                 .thenApply(this::documentsToEntities);
     }
 
     protected CompletableFuture<Optional<E>> queryOne(Query query) {
-        Objects.requireNonNull(query);
+        Objects.requireNonNull(query, "A query não pode ser nula");
 
         return toCompletableFuture(query.limit(1).get())
                 .thenApply(snapshot -> snapshot.getDocuments()
@@ -120,7 +118,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
                 .toList();
     }
 
-    protected static UUID idtoUUID(String id) {
+    protected static UUID idToUUID(String id) {
         return UUID.fromString(id);
     }
 
@@ -129,7 +127,7 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     protected static Timestamp toTimestamp(Instant instant) {
-        Objects.requireNonNull(instant);
+        Objects.requireNonNull(instant, "O instant não pode ser nulo");
 
         return Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
     }
@@ -139,9 +137,9 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     protected static Instant toInstant(Timestamp timestamp) {
-        Objects.requireNonNull(timestamp);
+        Objects.requireNonNull(timestamp, "O timestamp não pode ser nulo");
 
-        return timestamp.toDate().toInstant();
+        return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
     }
 
     protected static LocalDate toLocalDate(Timestamp timestamp) {

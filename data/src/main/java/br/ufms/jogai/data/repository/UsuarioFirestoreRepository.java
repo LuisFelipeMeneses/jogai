@@ -1,18 +1,38 @@
 package br.ufms.jogai.data.repository;
 
-import br.ufms.jogai.data.firebase.FirestoreRepository;
+import br.ufms.jogai.data.firebase.FirestoreRepositoryComValoresUnicos;
+import br.ufms.jogai.data.firebase.config.FirebaseConfig;
 import br.ufms.jogai.domain.usuario.StatusUsuario;
 import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioRepository;
-import com.google.cloud.firestore.DocumentSnapshot;
+import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
+import br.ufms.jogai.domain.util.Validar;
+import com.google.cloud.firestore.Firestore;
+import com.google.cloud.Timestamp;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
-public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUID> implements UsuarioRepository {
+public class UsuarioFirestoreRepository extends FirestoreRepositoryComValoresUnicos<Usuario, UUID> implements UsuarioRepository {
 
     public UsuarioFirestoreRepository() {
-        super(db.collection("usuarios"));
+        this(FirebaseConfig.getFirestore());
+    }
+
+    public UsuarioFirestoreRepository(Firestore firestore) {
+        super(Objects.requireNonNull(firestore).collection("usuarios"), "usuario", Map.of(
+                "email", UsuarioFirestoreRepository::normalizarEmail,
+                "telefone", Validar::telefone
+        ));
+    }
+
+    @Override
+    protected RuntimeException conflitoUnico(String campo) {
+        return new UsuarioDuplicadoException(campo);
+    }
+
+    private static String normalizarEmail(String email) {
+        return Validar.email(Objects.requireNonNull(email).strip()).toLowerCase(Locale.ROOT);
     }
 
     @Override
@@ -28,15 +48,15 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     }
 
     @Override
-    protected Usuario documentToEntity(DocumentSnapshot document) {
+    protected Usuario mapToEntity(String id, Map<String, Object> dados) {
         return Usuario.reconstitute(
-                idtoUUID(document.getId()),
-                document.getString("nome"),
-                document.getString("email"),
-                document.getString("telefone"),
-                toLocalDate(document.getTimestamp("nascimento")),
-                toInstant(document.getTimestamp("cadastradoEm")),
-                StatusUsuario.valueOf(document.getString("status"))
+                idToUUID(id),
+                (String) dados.get("nome"),
+                (String) dados.get("email"),
+                (String) dados.get("telefone"),
+                toLocalDate((Timestamp) dados.get("nascimento")),
+                toInstant((Timestamp) dados.get("cadastradoEm")),
+                StatusUsuario.valueOf((String) dados.get("status"))
         );
     }
 
@@ -54,14 +74,14 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     public CompletableFuture<Optional<Usuario>> buscarPorEmail(String email) {
         Objects.requireNonNull(email);
 
-        return queryOne(collection.whereEqualTo("email", email));
+        return queryOne(collection.whereEqualTo("email", normalizarEmail(email)));
     }
 
     @Override
     public CompletableFuture<Optional<Usuario>> buscarPorTelefone(String telefone) {
         Objects.requireNonNull(telefone);
 
-        return queryOne(collection.whereEqualTo("telefone", telefone));
+        return queryOne(collection.whereEqualTo("telefone", Validar.telefone(telefone)));
     }
 
     @Override
