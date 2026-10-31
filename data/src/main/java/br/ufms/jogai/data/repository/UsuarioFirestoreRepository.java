@@ -21,9 +21,7 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     }
 
     public UsuarioFirestoreRepository(Firestore firestore) {
-        super(Objects.requireNonNull(firestore).collection("usuarios"), Set.of(
-                "email", "telefone"
-        ));
+        super(Objects.requireNonNull(firestore).collection("usuarios"), Set.of("email", "telefone"));
     }
 
     @Override

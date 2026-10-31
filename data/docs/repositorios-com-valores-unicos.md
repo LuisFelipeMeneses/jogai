@@ -280,8 +280,9 @@ documentos existentes permanecem compatíveis.
 ## API em inglês e adaptação do domínio
 
 A API genérica de criação é `create(entity)`. A API oferece `save`, `delete`, `get`
-e `getPage(pageSize, afterId)`. `getAll` foi removido para evitar leituras sem
-limite. Para consultas filtradas, use `queryPage(query, pageSize, afterId)`; para
+e `getPage(pageSize, afterId)`. `getAll()` lista a coleção completa, sem limite de
+página, materializando todos os resultados em memória. Para consultas filtradas,
+use `queryPage(query, pageSize, afterId)`; para
 um único resultado, `queryOne(query)`. Veja os exemplos de
 [paginação](pagination.md).
 O hook de tradução de conflitos é

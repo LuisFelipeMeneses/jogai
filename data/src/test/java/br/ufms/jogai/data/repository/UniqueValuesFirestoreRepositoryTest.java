@@ -1,5 +1,6 @@
 package br.ufms.jogai.data.repository;
 
+import br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import org.junit.jupiter.api.AfterEach;
@@ -11,7 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 

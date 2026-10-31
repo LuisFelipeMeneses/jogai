@@ -49,7 +49,7 @@ import java.util.concurrent.ForkJoinPool;
  * previous values, and deletion releases the deleted entity's reservations.
  *
  * <p>Collections start empty and all writes must use the same reservation protocol and canonical
- * field mappings. No initialization, collection scan, or legacy-data migration is performed.
+ * field mappings. Writes perform no initialization, collection scan, or legacy-data migration.
  * Previously stored unique values are read directly from the persisted fields on update/delete.
  * All writers must follow this reservation protocol; direct privileged writes can bypass it.
  *
@@ -293,6 +293,20 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     @Override
     public CompletableFuture<Optional<E>> get(ID id) {
         return get(documentReference(id));
+    }
+
+    /**
+     * Loads every document directly contained in this repository's collection.
+     *
+     * <p>This method has no page-size limit and materializes the entire result in memory.
+     * Read volume and memory usage grow with collection size. Subcollections are not traversed.
+     * Use {@link #getPage(int)} when a bounded result is preferable.
+     *
+     * @return all reconstructed entities, or an empty collection if no documents exist
+     */
+    @Override
+    public final CompletableFuture<Collection<E>> getAll() {
+        return toCompletableFuture(collection.get()).thenApply(this::documentsToEntities);
     }
 
     /**

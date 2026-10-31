@@ -7,7 +7,7 @@ primeira operação, mantendo documentos e reservas no mesmo commit.
 
 ## Ler uma página por vez
 
-`getAll()` foi removido. A substituição retorna um `Page` imutável com os itens e
+`getPage()` retorna um `Page` imutável com os itens e
 um cursor opcional:
 
 ```java
@@ -33,6 +33,18 @@ como entidades. Portanto, uma página de 50 pode ler 51 documentos. Não há lei
 por offset nem coleção inteira mantida em memória. Acumular todas as páginas em
 uma lista volta a consumir memória proporcional à coleção; processe cada página
 e descarte-a quando terminar.
+
+## Ler a coleção completa
+
+```java
+var allUsers = users.getAll().get();
+```
+
+`getAll()` retorna todos os documentos diretamente contidos na coleção, inclusive
+quando a quantidade ultrapassa `MAX_PAGE_SIZE`. Retorna uma coleção vazia se não
+houver documentos e não percorre subcoleções. O resultado completo fica em memória,
+com volume de leitura proporcional ao tamanho da coleção. `getPage()` permanece
+disponível para limitar cada consulta.
 
 ## Filtrar e ordenar nas classes filhas
 

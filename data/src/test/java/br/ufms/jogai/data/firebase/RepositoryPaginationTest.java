@@ -2,6 +2,7 @@ package br.ufms.jogai.data.firebase;
 
 import br.ufms.jogai.domain.shared.Entidade;
 import br.ufms.jogai.domain.shared.Page;
+import br.ufms.jogai.domain.shared.Repository;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +42,34 @@ class RepositoryPaginationTest {
                     new Item(String.valueOf(id), "Same", (id - 'a') % 2 == 0 ? "A" : "B"));
             return null;
         }));
+    }
+
+    @Test
+    void getAllReturnsAnEmptyCollectionThroughTheRepositoryInterface() throws Exception {
+        Repository<Item, String> contract = repository;
+        assertTrue(await(contract.getAll()).isEmpty());
+    }
+
+    @Test
+    void getAllIncludesMoreThanOneMaximumPageAndDoesNotTraverseSubcollections() throws Exception {
+        int count = FirestoreRepository.MAX_PAGE_SIZE + 3;
+        await(repository.writeTransaction(writes -> {
+            for (int i = 0; i < count; i++) {
+                writes.create(repository, new Item("item-" + i, "Name " + i, "A"));
+            }
+            return null;
+        }));
+        repository.collection.document("item-0").collection("children").document("nested")
+                .set(Map.of("name", "Nested", "group", "A")).get();
+        var all = await(repository.getAll());
+        var ids = all.stream().map(Item::getId).collect(java.util.stream.Collectors.toSet());
+        assertEquals(count, all.size());
+        assertEquals(count, ids.size());
+        for (int i = 0; i < count; i++) assertTrue(ids.contains("item-" + i));
+        assertFalse(ids.contains("nested"));
+        var page = await(repository.getPage(FirestoreRepository.MAX_PAGE_SIZE));
+        assertEquals(FirestoreRepository.MAX_PAGE_SIZE, page.items().size());
+        assertTrue(page.nextCursor().isPresent());
     }
 
     @Test

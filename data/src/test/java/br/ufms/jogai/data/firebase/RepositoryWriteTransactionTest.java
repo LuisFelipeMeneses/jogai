@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 

@@ -1,5 +1,6 @@
 package br.ufms.jogai.data.repository;
 
+import br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository;
 import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
 import br.ufms.jogai.domain.usuario.StatusUsuario;
@@ -15,7 +16,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 

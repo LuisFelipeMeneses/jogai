@@ -124,7 +124,11 @@ Reading by ID reconstructs one entity. `queryOne` requests `limit(1)` and handle
 that result directly without building a stream or intermediate Optional.
 Collection queries reconstruct one entity per returned document.
 
-The public `getAll()` and unbounded protected query helper were removed.
+`getAll()` executes one collection query without a page-size limit and returns
+all direct documents as entities, including results beyond `MAX_PAGE_SIZE`.
+It does not traverse subcollections. Read volume and memory usage grow with the
+complete collection; it returns an empty collection when no documents exist.
+The unbounded protected query helper remains removed.
 `getPage(pageSize, afterId)` orders by document ID; pageSize must be 1–200. It
 fetches at most pageSize + 1 documents to detect continuation, reconstructs only
 the returned entities, and exposes the last returned ID as an exclusive cursor

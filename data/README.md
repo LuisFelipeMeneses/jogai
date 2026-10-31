@@ -59,9 +59,10 @@ Nas atualizações e exclusões, os valores únicos anteriores são extraídos d
 campos canônicos persistidos, sem reconstruir a entidade antiga nem normalizá-la
 novamente. A implementação não procura documentos legados sem reservas.
 
-As listagens retornam `Page`, com `items()` e `nextCursor()`. Use `getPage(50)`
-e `getPage(50, cursor)`; o tamanho permitido é de 1 a 200. `getAll()` foi removido,
-assim como o auxiliar de consultas sem limite. `listarPorNome` e `listarPorStatus`
+As listagens paginadas retornam `Page`, com `items()` e `nextCursor()`. Use `getPage(50)`
+e `getPage(50, cursor)`; o tamanho permitido é de 1 a 200. `getAll()` lista todos
+os documentos diretamente contidos na coleção, sem limite de página, e carrega
+o resultado completo em memória. `listarPorNome` e `listarPorStatus`
 também recebem tamanho e cursor. A consulta busca no máximo uma página mais um
 documento para detectar continuação. Veja o guia de
 [paginação](docs/pagination.md).

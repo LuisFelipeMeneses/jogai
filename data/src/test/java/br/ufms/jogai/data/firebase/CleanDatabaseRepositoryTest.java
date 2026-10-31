@@ -19,7 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 

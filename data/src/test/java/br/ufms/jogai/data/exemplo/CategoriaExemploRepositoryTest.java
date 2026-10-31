@@ -13,7 +13,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 
