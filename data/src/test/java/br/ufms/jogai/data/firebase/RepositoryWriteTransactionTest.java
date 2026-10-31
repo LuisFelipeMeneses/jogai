@@ -39,9 +39,12 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Multi-document invariants are checked against persisted data, not merely future completion. */
+/**
+ * Multi-document invariants are checked against persisted data, not merely future completion.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class RepositoryWriteTransactionTest {
+
     private Firestore db;
     private RegistrationExampleRepository users;
     private CategoriaExemploRepository categories;
@@ -60,7 +63,9 @@ class RepositoryWriteTransactionTest {
     }
 
     @AfterEach
-    void close() throws Exception { db.close(); }
+    void close() throws Exception {
+        db.close();
+    }
 
     @Test
     void batchCreatesAllUsersAndReservations() throws Exception {
@@ -123,8 +128,10 @@ class RepositoryWriteTransactionTest {
         var b = user("b", 2);
         await(users.cadastrarTodos(List.of(a, b)));
         String emailA = a.getEmail(), phoneA = a.getTelefone();
-        a.setEmail(b.getEmail()); a.setTelefone(b.getTelefone());
-        b.setEmail(emailA); b.setTelefone(phoneA);
+        a.setEmail(b.getEmail());
+        a.setTelefone(b.getTelefone());
+        b.setEmail(emailA);
+        b.setTelefone(phoneA);
         await(users.writeTransaction(writes -> List.of(writes.save(users, a), writes.save(users, b))));
         assertEquals("b@example.com", await(users.get(a.getId())).orElseThrow().getEmail());
         assertEquals("a@example.com", await(users.get(b.getId())).orElseThrow().getEmail());
@@ -191,10 +198,13 @@ class RepositoryWriteTransactionTest {
     @Test
     void serverCommitFailureRollsBackBothCollectionsAndInitialization() throws Exception {
         var invalid = new FirestoreRepository<CategoriaExemplo, UUID>(db.collection("invalid_categories")) {
-            @Override protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
+            @Override
+            protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
                 return Map.of("nome", entity.getNome(), "codigo", entity.getCodigo(), "payload", "x".repeat(1_048_577));
             }
-            @Override protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
+
+            @Override
+            protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
                 return new CategoriaExemplo(idToUUID(id), (String) data.get("nome"), (String) data.get("codigo"));
             }
         };
@@ -357,10 +367,13 @@ class RepositoryWriteTransactionTest {
     @Test
     void mapperCannotReturnAnEntityWithADifferentId() throws Exception {
         var invalid = new FirestoreRepository<CategoriaExemplo, UUID>(db.collection("invalid_categories")) {
-            @Override protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
+            @Override
+            protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
                 return Map.of("nome", entity.getNome(), "codigo", entity.getCodigo());
             }
-            @Override protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
+
+            @Override
+            protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
                 return new CategoriaExemplo(UUID.randomUUID(), (String) data.get("nome"), (String) data.get("codigo"));
             }
         };
@@ -387,10 +400,13 @@ class RepositoryWriteTransactionTest {
 
     private FirestoreRepository<CategoriaExemplo, UUID> categoryRepository(String collection, String scope, boolean unique) {
         return new FirestoreRepository<>(db.collection(collection), scope, unique ? java.util.Set.of("codigo") : java.util.Set.of()) {
-            @Override protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
+            @Override
+            protected Map<String, Object> entityToMap(CategoriaExemplo entity) {
                 return Map.of("nome", entity.getNome(), "codigo", entity.getCodigo());
             }
-            @Override protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
+
+            @Override
+            protected CategoriaExemplo mapToEntity(String id, Map<String, Object> data) {
                 return new CategoriaExemplo(idToUUID(id), (String) data.get("nome"), (String) data.get("codigo"));
             }
         };
@@ -413,7 +429,8 @@ class RepositoryWriteTransactionTest {
         int winners = 0;
         for (int i = 0; i < errors.size(); i++) {
             if (errors.get(i) == null) winners++;
-            else assertEquals("email", assertInstanceOf(UsuarioDuplicadoException.class, cause(errors.get(i))).getCampo());
+            else
+                assertEquals("email", assertInstanceOf(UsuarioDuplicadoException.class, cause(errors.get(i))).getCampo());
             assertEquals(errors.get(i) == null, await(users.get(companions.get(i).getId())).isPresent());
         }
         assertEquals(1, winners);
@@ -479,7 +496,9 @@ class RepositoryWriteTransactionTest {
                         for (var count : groups.values()) assertEquals(2, count);
                         observations.incrementAndGet();
                     } while ((!finished.get() || observations.get() < 3) && observations.get() < 100);
-                } catch (Exception error) { throw new IllegalStateException(error); }
+                } catch (Exception error) {
+                    throw new IllegalStateException(error);
+                }
             }, observerExecutor);
             List<Supplier<CompletableFuture<?>>> actions = new ArrayList<>();
             for (int i = 0; i < 4; i++) {
@@ -487,8 +506,11 @@ class RepositoryWriteTransactionTest {
                 var b = user("pair-" + i + "-b", 301 + i * 2);
                 actions.add(() -> users.cadastrarTodos(List.of(a, b)));
             }
-            try { for (var error : concurrently(actions)) assertNull(error); }
-            finally { finished.set(true); }
+            try {
+                for (var error : concurrently(actions)) assertNull(error);
+            } finally {
+                finished.set(true);
+            }
             await(observer);
         }
         assertTrue(observations.get() >= 3);
@@ -511,18 +533,22 @@ class RepositoryWriteTransactionTest {
         var start = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(actions.size())) {
             List<CompletableFuture<Throwable>> results = new ArrayList<>();
-            for (var action : actions) results.add(CompletableFuture.supplyAsync(() -> {
-                ready.countDown();
-                try {
-                    if (!start.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("Start gate timed out");
-                    return action.get();
-                } catch (InterruptedException error) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(error);
-                }
-            }, executor).thenCompose(future -> future).handle((result, error) -> error));
-            try { assertTrue(ready.await(15, TimeUnit.SECONDS)); }
-            finally { start.countDown(); }
+            for (var action : actions)
+                results.add(CompletableFuture.supplyAsync(() -> {
+                    ready.countDown();
+                    try {
+                        if (!start.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("Start gate timed out");
+                        return action.get();
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(error);
+                    }
+                }, executor).thenCompose(future -> future).handle((result, error) -> error));
+            try {
+                assertTrue(ready.await(15, TimeUnit.SECONDS));
+            } finally {
+                start.countDown();
+            }
             List<Throwable> errors = new ArrayList<>();
             for (var result : results) errors.add(await(result));
             return errors;
@@ -581,7 +607,9 @@ class RepositoryWriteTransactionTest {
         return new CategoriaExemplo(UUID.randomUUID(), "Categoria Exemplo", code);
     }
 
-    private static <T> T await(CompletableFuture<T> result) throws Exception { return result.get(90, TimeUnit.SECONDS); }
+    private static <T> T await(CompletableFuture<T> result) throws Exception {
+        return result.get(90, TimeUnit.SECONDS);
+    }
 
     private static Throwable cause(Throwable error) {
         while (error.getCause() != null && !(error instanceof UsuarioDuplicadoException)) error = error.getCause();

@@ -19,9 +19,12 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Projection must preserve literal field names and never truncate the replacement write. */
+/**
+ * Projection must preserve literal field names and never truncate the replacement write.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class ProjectedReadsTest {
+
     private Firestore db;
     private PayloadRepository repository;
 
@@ -33,7 +36,9 @@ class ProjectedReadsTest {
     }
 
     @AfterEach
-    void close() throws Exception { db.close(); }
+    void close() throws Exception {
+        db.close();
+    }
 
     @Test
     void literalDottedUniqueFieldCanChangeAndBeReleasedWithoutTruncatingUnrelatedData() throws Exception {
@@ -56,20 +61,33 @@ class ProjectedReadsTest {
         assertEquals("old@example.com", db.collection("payloads").document("b").get().get().getData().get("contact.email"));
     }
 
-    private static <T> T await(CompletableFuture<T> result) throws Exception { return result.get(60, TimeUnit.SECONDS); }
+    private static <T> T await(CompletableFuture<T> result) throws Exception {
+        return result.get(60, TimeUnit.SECONDS);
+    }
 
     private static final class Payload extends Entidade<String> {
         private final String email, body;
-        private Payload(String id, String email, String body) { super(id); this.email = email; this.body = body; }
+
+        private Payload(String id, String email, String body) {
+            super(id);
+            this.email = email;
+            this.body = body;
+        }
     }
 
     private static final class PayloadRepository extends FirestoreRepository<Payload, String> {
-        private PayloadRepository(Firestore firestore) { super(firestore.collection("payloads"), Set.of("contact.email")); }
-        @Override protected Map<String, Object> entityToMap(Payload entity) {
+        private PayloadRepository(Firestore firestore) {
+            super(firestore.collection("payloads"), Set.of("contact.email"));
+        }
+
+        @Override
+        protected Map<String, Object> entityToMap(Payload entity) {
             return Map.of("contact.email", entity.email, "payload", entity.body,
                     "contact", Map.of("email", "different@example.com"));
         }
-        @Override protected Payload mapToEntity(String id, Map<String, Object> data) {
+
+        @Override
+        protected Payload mapToEntity(String id, Map<String, Object> data) {
             return new Payload(id, (String) data.get("contact.email"), (String) data.get("payload"));
         }
     }

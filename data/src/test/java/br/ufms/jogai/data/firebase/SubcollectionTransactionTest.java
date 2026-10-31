@@ -26,9 +26,12 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Root collections, subcollections, and unique reservations share the same atomic commit. */
+/**
+ * Root collections, subcollections, and unique reservations share the same atomic commit.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class SubcollectionTransactionTest {
+
     private Firestore db;
     private ItemRepository roots, members, otherMembers, notes;
 
@@ -43,7 +46,9 @@ class SubcollectionTransactionTest {
     }
 
     @AfterEach
-    void close() throws Exception { db.close(); }
+    void close() throws Exception {
+        db.close();
+    }
 
     private void seedHierarchy() throws Exception {
         await(roots.commit(writes -> {
@@ -110,7 +115,8 @@ class SubcollectionTransactionTest {
             writes.create(notes, item("first", "duplicated"));
             writes.create(notes, item("second", "duplicated"));
         }));
-        for (var repository : List.of(roots, members, notes)) assertTrue(await(repository.getPage(10)).items().isEmpty());
+        for (var repository : List.of(roots, members, notes))
+            assertTrue(await(repository.getPage(10)).items().isEmpty());
         assertReservations(0);
     }
 
@@ -209,7 +215,9 @@ class SubcollectionTransactionTest {
         }
     }
 
-    private static Item item(String id, String value) { return new Item(id, value); }
+    private static Item item(String id, String value) {
+        return new Item(id, value);
+    }
 
     private static void conflict(CompletableFuture<?> future) {
         Throwable error = assertThrows(ExecutionException.class, () -> await(future));
@@ -217,19 +225,39 @@ class SubcollectionTransactionTest {
         assertEquals("value", assertInstanceOf(DuplicateUniqueValueException.class, error).getField());
     }
 
-    private static <T> T await(CompletableFuture<T> future) throws Exception { return future.get(60, TimeUnit.SECONDS); }
+    private static <T> T await(CompletableFuture<T> future) throws Exception {
+        return future.get(60, TimeUnit.SECONDS);
+    }
 
     private static final class Item extends Entidade<String> {
         private final String value;
-        private Item(String id, String value) { super(id); this.value = value; }
+
+        private Item(String id, String value) {
+            super(id);
+            this.value = value;
+        }
     }
 
     private static final class ItemRepository extends FirestoreRepository<Item, String> {
-        private ItemRepository(CollectionReference collection) { super(collection, java.util.Set.of("value")); }
-        @Override protected Map<String, Object> entityToMap(Item item) { return Map.of("value", item.value); }
-        @Override protected Item mapToEntity(String id, Map<String, Object> data) { return item(id, (String) data.get("value")); }
+        private ItemRepository(CollectionReference collection) {
+            super(collection, java.util.Set.of("value"));
+        }
+
+        @Override
+        protected Map<String, Object> entityToMap(Item item) {
+            return Map.of("value", item.value);
+        }
+
+        @Override
+        protected Item mapToEntity(String id, Map<String, Object> data) {
+            return item(id, (String) data.get("value"));
+        }
+
         private CompletableFuture<Void> commit(Consumer<RepositoryWriteTransaction> planner) {
-            return writeTransaction(writes -> { planner.accept(writes); return null; });
+            return writeTransaction(writes -> {
+                planner.accept(writes);
+                return null;
+            });
         }
     }
 }

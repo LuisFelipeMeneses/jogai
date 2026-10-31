@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class RepositoryPaginationTest {
+
     private Firestore db;
     private ItemRepository repository;
 
@@ -34,12 +35,15 @@ class RepositoryPaginationTest {
     }
 
     @AfterEach
-    void close() throws Exception { db.close(); }
+    void close() throws Exception {
+        db.close();
+    }
 
     private void seed() throws Exception {
         await(repository.writeTransaction(writes -> {
-            for (char id = 'a'; id <= 'g'; id++) writes.create(repository,
-                    new Item(String.valueOf(id), "Same", (id - 'a') % 2 == 0 ? "A" : "B"));
+            for (char id = 'a'; id <= 'g'; id++)
+                writes.create(repository,
+                        new Item(String.valueOf(id), "Same", (id - 'a') % 2 == 0 ? "A" : "B"));
             return null;
         }));
     }
@@ -142,23 +146,38 @@ class RepositoryPaginationTest {
         assertTrue(page.nextCursor().isEmpty());
     }
 
-    private static <T> T await(CompletableFuture<T> result) throws Exception { return result.get(60, TimeUnit.SECONDS); }
+    private static <T> T await(CompletableFuture<T> result) throws Exception {
+        return result.get(60, TimeUnit.SECONDS);
+    }
 
     private static final class Item extends Entidade<String> {
         private final String name, group;
-        private Item(String id, String name, String group) { super(id); this.name = name; this.group = group; }
+
+        private Item(String id, String name, String group) {
+            super(id);
+            this.name = name;
+            this.group = group;
+        }
     }
 
     private static final class ItemRepository extends FirestoreRepository<Item, String> {
         private final AtomicInteger mappings = new AtomicInteger();
-        private ItemRepository(Firestore firestore) { super(firestore.collection("items")); }
-        @Override protected Map<String, Object> entityToMap(Item entity) {
+
+        private ItemRepository(Firestore firestore) {
+            super(firestore.collection("items"));
+        }
+
+        @Override
+        protected Map<String, Object> entityToMap(Item entity) {
             return Map.of("name", entity.name, "group", entity.group);
         }
-        @Override protected Item mapToEntity(String id, Map<String, Object> data) {
+
+        @Override
+        protected Item mapToEntity(String id, Map<String, Object> data) {
             mappings.incrementAndGet();
             return new Item(id, (String) data.get("name"), (String) data.get("group"));
         }
+
         CompletableFuture<Page<Item, String>> byGroup(String group, int size, String cursor) {
             return queryPage(collection.whereEqualTo("group", group).orderBy("name"), size, cursor);
         }

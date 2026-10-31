@@ -23,9 +23,12 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Each test begins with an empty database and performs no administrative preparation. */
+/**
+ * Each test begins with an empty database and performs no administrative preparation.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class CleanDatabaseRepositoryTest {
+
     private Firestore db;
     private CountingRepository repository;
 
@@ -37,7 +40,9 @@ class CleanDatabaseRepositoryTest {
     }
 
     @AfterEach
-    void close() throws Exception { db.close(); }
+    void close() throws Exception {
+        db.close();
+    }
 
     @Test
     void firstSaveCanCreateAndUpdateWithoutAnyInitialization() throws Exception {
@@ -91,7 +96,8 @@ class CleanDatabaseRepositoryTest {
         assertEquals(1, db.collection("usuarios").get().get().size());
         var reservations = db.collection(COLLECTION_PATH).get().get().getDocuments();
         assertEquals(2, reservations.size());
-        for (var reservation : reservations) assertEquals(winner.getId().toString(), reservation.getString("entidadeId"));
+        for (var reservation : reservations)
+            assertEquals(winner.getId().toString(), reservation.getString("entidadeId"));
         assertEquals(0, db.collection("valores_unicos_controle").get().get().size());
     }
 
@@ -114,12 +120,19 @@ class CleanDatabaseRepositoryTest {
         return Usuario.create("Pessoa Exemplo", label + "@example.com", phone, LocalDate.of(1990, 1, 1));
     }
 
-    private static <T> T await(CompletableFuture<T> result) throws Exception { return result.get(60, TimeUnit.SECONDS); }
+    private static <T> T await(CompletableFuture<T> result) throws Exception {
+        return result.get(60, TimeUnit.SECONDS);
+    }
 
     private static final class CountingRepository extends UsuarioFirestoreRepository {
         private final AtomicInteger reconstructions = new AtomicInteger();
-        private CountingRepository(Firestore firestore) { super(firestore); }
-        @Override protected Usuario mapToEntity(String id, Map<String, Object> data) {
+
+        private CountingRepository(Firestore firestore) {
+            super(firestore);
+        }
+
+        @Override
+        protected Usuario mapToEntity(String id, Map<String, Object> data) {
             reconstructions.incrementAndGet();
             return super.mapToEntity(id, data);
         }

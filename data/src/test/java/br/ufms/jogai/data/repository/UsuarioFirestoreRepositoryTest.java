@@ -20,7 +20,9 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Executa apenas no emulador, com um projeto isolado por teste e sem credenciais reais. */
+/**
+ * Executa apenas no emulador, com um projeto isolado por teste e sem credenciais reais.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class UsuarioFirestoreRepositoryTest {
 

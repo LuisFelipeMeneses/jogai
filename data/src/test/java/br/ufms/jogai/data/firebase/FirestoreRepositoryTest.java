@@ -20,7 +20,9 @@ import static br.ufms.jogai.data.firebase.UniqueValuesFirestoreRepository.COLLEC
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Exercita o fluxo sem campos únicos, inclusive IDs String e valores opcionais. */
+/**
+ * Exercita o fluxo sem campos únicos, inclusive IDs String e valores opcionais.
+ */
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
 class FirestoreRepositoryTest {
 

@@ -8,15 +8,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Exemplo compilado e exercitado pelos testes de integração. */
+/**
+ * Exemplo compilado e exercitado pelos testes de integração.
+ */
 public final class CategoriaExemploRepository extends FirestoreRepository<CategoriaExemplo, UUID> {
 
     public CategoriaExemploRepository(Firestore firestore) {
-        super(firestore.collection("categorias_exemplo"), "categoria_exemplo",
-                Set.of("codigo"));
+        super(firestore.collection("categorias_exemplo"), Set.of("codigo"));
     }
 
-    /** Configura uma coleção ou subcoleção, com código único dentro do caminho completo. */
+    /**
+     * Configura uma coleção ou subcoleção, com código único dentro do caminho completo.
+     */
     public CategoriaExemploRepository(CollectionReference collection) {
         super(collection, Set.of("codigo"));
     }

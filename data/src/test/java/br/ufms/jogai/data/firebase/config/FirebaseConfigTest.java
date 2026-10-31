@@ -13,9 +13,13 @@ import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Uses synthetic resources, never real service account credentials or a live Firebase app. */
+/**
+ * Uses synthetic resources, never real service account credentials or a live Firebase app.
+ */
 class FirebaseConfigTest {
-    @TempDir Path directory;
+
+    @TempDir
+    Path directory;
 
     @Test
     void readsResourcePackagedInAJar() throws Exception {
