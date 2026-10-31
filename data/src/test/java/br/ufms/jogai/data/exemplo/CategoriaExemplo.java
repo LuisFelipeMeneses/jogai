@@ -6,7 +6,9 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Entidade didática usada para demonstrar a reutilização sem alterar o domínio do projeto. */
+/**
+ * Entidade didática usada para demonstrar a reutilização sem alterar o domínio do projeto.
+ */
 public final class CategoriaExemplo extends Entidade<UUID> {
 
     private final String nome;
