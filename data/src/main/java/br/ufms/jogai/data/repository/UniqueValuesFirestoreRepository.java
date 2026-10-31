@@ -1,0 +1,196 @@
+package br.ufms.jogai.data.repository;
+
+import com.google.cloud.firestore.CollectionReference;
+import com.google.cloud.firestore.DocumentReference;
+import com.google.cloud.firestore.DocumentSnapshot;
+import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.Transaction;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+/**
+ * Manages reservations for canonical String values in a caller-owned transaction.
+ * This repository never starts or commits transactions. Existing collection and field names
+ * are retained for storage compatibility; Base64 encoding is reversible, not encryption.
+ */
+public final class UniqueValuesFirestoreRepository {
+
+    private final CollectionReference collection;
+
+    /**
+     * Creates a reservation repository without reading or writing any documents.
+     * @param firestore the application-owned Firestore client
+     */
+    public UniqueValuesFirestoreRepository(Firestore firestore) {
+        collection = Objects.requireNonNull(firestore).collection("valores_unicos");
+    }
+
+    /**
+     * Creates attempt-local reservation state for a caller-owned transaction.
+     * @param transaction the transaction that will commit all related writes
+     * @return a fresh operation that must not be shared across retry attempts
+     */
+    public Operation inTransaction(Transaction transaction) {
+        return new Operation(Objects.requireNonNull(transaction));
+    }
+
+    /**
+     * Builds a stable initialization marker for a collection, scope, and field set.
+     * @param collectionPath the entity collection path
+     * @param scope the unique namespace for that entity collection
+     * @param fields the constrained fields, sorted internally to make order irrelevant
+     * @return a document reference; this method performs no database access
+     */
+    public DocumentReference initializationMarker(String collectionPath, String scope, Set<String> fields) {
+        return collection.getFirestore().collection("valores_unicos_controle")
+                .document(key(Stream.concat(Stream.of(collectionPath, scope), fields.stream().sorted())));
+    }
+
+    private DocumentReference reference(String scope, String field, String value) {
+        // Encode each component separately to avoid ambiguous reservation keys.
+        return collection.document(key(Stream.of(scope, field, value)));
+    }
+
+    private static String key(Stream<String> parts) {
+        return parts.map(UniqueValuesFirestoreRepository::encode).collect(Collectors.joining("."));
+    }
+
+    private static String encode(String value) {
+        if (Objects.requireNonNull(value).isBlank()) {
+            throw new IllegalArgumentException("Reservation key components must not be blank");
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private record Reservation(String scope, String field, String entityId) {
+        Map<String, Object> data() {
+            return Map.of("entidade", scope, "campo", field, "entidadeId", entityId);
+        }
+    }
+
+    /**
+     * Use one operation per transaction callback attempt; finish reads before apply().
+     */
+    public final class Operation {
+
+        private final Transaction transaction;
+        private final Map<DocumentReference, DocumentSnapshot> readDocuments = new LinkedHashMap<>();
+        // A null value schedules deletion; an absent entry schedules no change.
+        private final Map<DocumentReference, Reservation> pendingChanges = new LinkedHashMap<>();
+        private boolean applied;
+
+        private Operation(Transaction transaction) {
+            this.transaction = transaction;
+        }
+
+        /**
+         * Checks all new values before preparing the release of changed previous values.
+         * @param scope the unique namespace
+         * @param entityId the reservation owner's ID
+         * @param previousValues previously persisted canonical values
+         * @param currentValues desired canonical values; empty when deleting an entity
+         * @throws ExecutionException if a database read fails
+         * @throws InterruptedException if a database read is interrupted
+         * @throws DuplicateUniqueValueException if a value belongs to another entity
+         */
+        public void replace(String scope, String entityId,
+                               Map<String, String> previousValues, Map<String, String> currentValues)
+                throws ExecutionException, InterruptedException {
+            for (var field : currentValues.entrySet()) {
+                reserve(scope, field.getKey(), field.getValue(), entityId);
+            }
+            for (var field : previousValues.entrySet()) {
+                if (!Objects.equals(field.getValue(), currentValues.get(field.getKey()))) {
+                    release(scope, field.getKey(), field.getValue(), entityId);
+                }
+            }
+        }
+
+        /**
+         * Checks persisted and pending ownership, then schedules a reservation in memory.
+         * @param scope the unique namespace
+         * @param field the constrained field name
+         * @param value the canonical value, already validated and normalized by the domain
+         * @param entityId the reservation owner's ID
+         * @throws ExecutionException if a database read fails
+         * @throws InterruptedException if a database read is interrupted
+         * @throws DuplicateUniqueValueException if another owner occupies the value
+         * @throws IllegalStateException if writes have already been applied
+         */
+        public void reserve(String scope, String field, String value, String entityId)
+                throws ExecutionException, InterruptedException {
+            Objects.requireNonNull(entityId);
+            DocumentReference reference = reference(scope, field, value);
+            DocumentSnapshot existing = read(reference);
+            Reservation pending = pendingChanges.get(reference);
+            if ((existing.exists() && !entityId.equals(existing.getString("entidadeId")))
+                    || (pending != null && !entityId.equals(pending.entityId()))) {
+                throw new DuplicateUniqueValueException(field);
+            }
+            pendingChanges.put(reference, new Reservation(scope, field, entityId));
+        }
+
+        /**
+         * Schedules release only if the supplied entity owns the persisted or pending reservation.
+         * @param scope the unique namespace
+         * @param field the constrained field name
+         * @param value the previous canonical value
+         * @param entityId the reservation owner's ID
+         * @throws ExecutionException if a database read fails
+         * @throws InterruptedException if a database read is interrupted
+         * @throws IllegalStateException if writes have already been applied
+         */
+        public void release(String scope, String field, String value, String entityId)
+                throws ExecutionException, InterruptedException {
+            Objects.requireNonNull(entityId);
+            DocumentReference reference = reference(scope, field, value);
+            DocumentSnapshot existing = read(reference);
+            Reservation pending = pendingChanges.get(reference);
+            // Never release another entity's reservation, even if existing data is inconsistent.
+            if (entityId.equals(existing.getString("entidadeId"))) {
+                pendingChanges.put(reference, null);
+            } else if (pending != null && entityId.equals(pending.entityId())) {
+                pendingChanges.remove(reference);
+            }
+        }
+
+        private DocumentSnapshot read(DocumentReference reference)
+                throws ExecutionException, InterruptedException {
+            checkNotApplied();
+            DocumentSnapshot document = readDocuments.get(reference);
+            if (document == null) {
+                document = transaction.get(reference).get();
+                readDocuments.put(reference, document);
+            }
+            return document;
+        }
+
+        /**
+         * Schedules the final writes on the supplied transaction; this method does not commit.
+         * After this call, the caller must not attempt further reads in the transaction.
+         * @throws IllegalStateException if this operation has already been applied
+         */
+        public void apply() {
+            checkNotApplied();
+            applied = true;
+            pendingChanges.forEach((reference, reservation) -> {
+                if (reservation == null) transaction.delete(reference);
+                else transaction.set(reference, reservation.data());
+            });
+        }
+
+        private void checkNotApplied() {
+            if (applied) {
+                throw new IllegalStateException("This reservation operation has already been applied");
+            }
+        }
+    }
+}

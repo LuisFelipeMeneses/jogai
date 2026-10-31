@@ -14,10 +14,10 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
-class ValoresUnicosFirestoreRepositoryTest {
+class UniqueValuesFirestoreRepositoryTest {
 
     private Firestore db;
-    private ValoresUnicosFirestoreRepository valores;
+    private UniqueValuesFirestoreRepository valores;
 
     @BeforeEach
     void configurar() {
@@ -25,7 +25,7 @@ class ValoresUnicosFirestoreRepositoryTest {
                 .setProjectId("demo-jogai-" + UUID.randomUUID().toString().substring(0, 8))
                 .setEmulatorHost(System.getenv("FIRESTORE_EMULATOR_HOST"))
                 .build().getService();
-        valores = new ValoresUnicosFirestoreRepository(db);
+        valores = new UniqueValuesFirestoreRepository(db);
     }
 
     @AfterEach
@@ -36,13 +36,13 @@ class ValoresUnicosFirestoreRepositoryTest {
     @Test
     void valoresIguaisEmCamposOuEntidadesDiferentesNaoColidem() throws Exception {
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "igual", "1");
-            reservas.reservar("usuario", "telefone", "igual", "2");
-            reservas.reservar("empresa", "email", "igual", "3");
-            reservas.reservar("a_b", "c", "igual", "4");
-            reservas.reservar("a", "b_c", "igual", "5");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "igual", "1");
+            reservas.reserve("usuario", "telefone", "igual", "2");
+            reservas.reserve("empresa", "email", "igual", "3");
+            reservas.reserve("a_b", "c", "igual", "4");
+            reservas.reserve("a", "b_c", "igual", "5");
+            reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
         assertEquals(5, db.collection("valores_unicos").get().get().size());
@@ -51,32 +51,32 @@ class ValoresUnicosFirestoreRepositoryTest {
     @Test
     void detectaConflitoEntreReservasAindaNaoGravadas() throws Exception {
         var resultado = db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.reservar("usuario", "email", "a@example.com", "2");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.reserve("usuario", "email", "a@example.com", "2");
+            reservas.apply();
             return null;
         });
         ExecutionException erro = assertThrows(ExecutionException.class,
                 () -> resultado.get(45, TimeUnit.SECONDS));
         Throwable causa = erro;
         while (causa.getCause() != null) causa = causa.getCause();
-        assertInstanceOf(ValorUnicoDuplicadoException.class, causa);
+        assertInstanceOf(DuplicateUniqueValueException.class, causa);
         assertEquals(0, db.collection("valores_unicos").get().get().size());
     }
 
     @Test
     void naoLiberaReservaDeOutroProprietario() throws Exception {
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.liberar("usuario", "email", "a@example.com", "2");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.release("usuario", "email", "a@example.com", "2");
+            reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
         var reservas = db.collection("valores_unicos").get().get().getDocuments();
@@ -87,20 +87,20 @@ class ValoresUnicosFirestoreRepositoryTest {
     @Test
     void ultimaAlteracaoDaReservaPrevaleceNaMesmaOperacao() throws Exception {
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
 
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.liberar("usuario", "email", "a@example.com", "1");
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.reservar("usuario", "telefone", "123", "1");
-            reservas.liberar("usuario", "telefone", "123", "1");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.release("usuario", "email", "a@example.com", "1");
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.reserve("usuario", "telefone", "123", "1");
+            reservas.release("usuario", "telefone", "123", "1");
+            reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
 
@@ -113,12 +113,12 @@ class ValoresUnicosFirestoreRepositoryTest {
     @Test
     void bloqueiaLeiturasOuNovaAplicacaoDepoisDeAgendarEscritas() throws Exception {
         db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "a@example.com", "1");
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "a@example.com", "1");
+            reservas.apply();
             assertThrows(IllegalStateException.class,
-                    () -> reservas.reservar("usuario", "telefone", "123", "1"));
-            assertThrows(IllegalStateException.class, reservas::aplicar);
+                    () -> reservas.reserve("usuario", "telefone", "123", "1"));
+            assertThrows(IllegalStateException.class, reservas::apply);
             return null;
         }).get(45, TimeUnit.SECONDS);
         assertEquals(1, db.collection("valores_unicos").get().get().size());

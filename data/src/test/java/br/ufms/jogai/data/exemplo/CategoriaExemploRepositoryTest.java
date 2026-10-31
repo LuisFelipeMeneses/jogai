@@ -1,6 +1,6 @@
 package br.ufms.jogai.data.exemplo;
 
-import br.ufms.jogai.data.repository.ValorUnicoDuplicadoException;
+import br.ufms.jogai.data.repository.DuplicateUniqueValueException;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import org.junit.jupiter.api.AfterEach;
@@ -40,46 +40,46 @@ class CategoriaExemploRepositoryTest {
     void cadastroEAtualizacaoRejeitamCodigoDuplicadoPreservandoDados() throws Exception {
         CategoriaExemplo a = categoria("EST");
         CategoriaExemplo b = categoria("FAM");
-        aguardar(repository.cadastrar(a));
-        aguardar(repository.cadastrar(b));
-        conflito("codigo", repository.cadastrar(categoria(" est ")));
-        conflito("id", repository.cadastrar(a));
+        aguardar(repository.create(a));
+        aguardar(repository.create(b));
+        conflito("codigo", repository.create(categoria(" est ")));
+        conflito("id", repository.create(a));
         b.setCodigo("EST");
         conflito("codigo", repository.save(b));
         assertEquals("FAM", aguardar(repository.get(b.getId())).orElseThrow().getCodigo());
         assertEquals(2, db.collection("valores_unicos").get().get().size());
-        conflito("codigo", repository.cadastrar(categoria("FAM")));
+        conflito("codigo", repository.create(categoria("FAM")));
     }
 
     @Test
     void alteraCodigoLivreMantemOProprioValorELiberaAnterior() throws Exception {
         CategoriaExemplo a = categoria("EST");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         a.setCodigo("COOP");
         aguardar(repository.save(a));
         aguardar(repository.save(a));
         assertEquals("COOP", aguardar(repository.get(a.getId())).orElseThrow().getCodigo());
-        aguardar(repository.cadastrar(categoria("EST")));
-        conflito("codigo", repository.cadastrar(categoria("coop")));
+        aguardar(repository.create(categoria("EST")));
+        conflito("codigo", repository.create(categoria("coop")));
         assertEquals(2, db.collection("valores_unicos").get().get().size());
     }
 
     @Test
     void exclusaoPermiteReutilizarCodigo() throws Exception {
         CategoriaExemplo a = categoria("EST");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         aguardar(repository.delete(a.getId()));
         aguardar(repository.delete(a.getId()));
         assertEquals(0, db.collection("valores_unicos").get().get().size());
-        aguardar(repository.cadastrar(categoria("EST")));
+        aguardar(repository.create(categoria("EST")));
     }
 
     @Test
     void atualizacoesConcorrentesNaoDuplicamCodigoNemDeixamReservasOrfas() throws Exception {
         CategoriaExemplo a = categoria("EST");
         CategoriaExemplo b = categoria("FAM");
-        aguardar(repository.cadastrar(a));
-        aguardar(repository.cadastrar(b));
+        aguardar(repository.create(a));
+        aguardar(repository.create(b));
         a.setCodigo("COOP");
         b.setCodigo("COOP");
         var primeira = repository.save(a).handle((entidade, erro) -> erro);
@@ -87,20 +87,20 @@ class CategoriaExemploRepositoryTest {
         Throwable erroA = aguardar(primeira);
         Throwable erroB = aguardar(segunda);
         assertNotEquals(erroA == null, erroB == null);
-        assertInstanceOf(ValorUnicoDuplicadoException.class, causa(erroA != null ? erroA : erroB));
+        assertInstanceOf(DuplicateUniqueValueException.class, causa(erroA != null ? erroA : erroB));
         var categorias = aguardar(repository.getAll());
         assertEquals(1, categorias.stream().filter(c -> c.getCodigo().equals("COOP")).count());
         assertEquals(2, db.collection("valores_unicos").get().get().size());
-        for (var categoria : categorias) conflito("codigo", repository.cadastrar(categoria(categoria.getCodigo())));
+        for (var categoria : categorias) conflito("codigo", repository.create(categoria(categoria.getCodigo())));
     }
 
     @Test
     void inicializacaoProtegeDocumentosPreexistentesTambemNaNovaEntidade() throws Exception {
         db.collection("categorias_exemplo").document(UUID.randomUUID().toString())
                 .set(Map.of("nome", "Estratégia", "codigo", "est")).get();
-        conflito("codigo", repository.cadastrar(categoria("EST")));
+        conflito("codigo", repository.create(categoria("EST")));
         assertEquals(0, db.collection("valores_unicos").get().get().size());
-        aguardar(repository.cadastrar(categoria("FAM")));
+        aguardar(repository.create(categoria("FAM")));
         assertEquals(2, db.collection("valores_unicos").get().get().size());
     }
 
@@ -114,7 +114,7 @@ class CategoriaExemploRepositoryTest {
 
     private static void conflito(String campo, CompletableFuture<?> resultado) {
         ExecutionException erro = assertThrows(ExecutionException.class, () -> aguardar(resultado));
-        assertEquals(campo, assertInstanceOf(ValorUnicoDuplicadoException.class, causa(erro)).getCampo());
+        assertEquals(campo, assertInstanceOf(DuplicateUniqueValueException.class, causa(erro)).getField());
     }
 
     private static Throwable causa(Throwable erro) {

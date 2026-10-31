@@ -52,7 +52,12 @@ public class Usuario extends Entidade<UUID> {
     }
 
     public void setEmail(String email) {
-        this.email = Validar.email(Objects.requireNonNull(email).strip(), true).toLowerCase(Locale.ROOT);
+        this.email = normalizarEmail(email);
+    }
+
+    /** Representação canônica usada pelo usuário e pelas consultas por email. */
+    public static String normalizarEmail(String email) {
+        return Validar.email(Objects.requireNonNull(email).strip(), true).toLowerCase(Locale.ROOT);
     }
 
     public String getTelefone() {

@@ -117,6 +117,60 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     @Test
+    void atualizaDocumentoAntigoUsandoNormalizacaoDoDominioParaLiberarReservas() throws Exception {
+        Usuario antigo = gravarUsuarioAntigo();
+        // Inicializa reservas sem regravar o documento legado.
+        aguardar(repository.cadastrar(usuario("b@example.com", "67996122810")));
+        antigo.setEmail("novo@example.com");
+        antigo.setTelefone("67996122811");
+        aguardar(repository.save(antigo));
+        assertReservasConsistentes();
+        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
+        assertReservasConsistentes();
+    }
+
+    @Test
+    void excluiDocumentoAntigoLiberandoAsReservasCanonicas() throws Exception {
+        Usuario antigo = gravarUsuarioAntigo();
+        aguardar(repository.cadastrar(usuario("b@example.com", "67996122810")));
+        aguardar(repository.delete(antigo.getId()));
+        assertReservasConsistentes();
+        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
+        assertReservasConsistentes();
+    }
+
+    @Test
+    void dominioRejeitaDocumentoAntigoInvalidoSemEscritasParciais() throws Exception {
+        Usuario antigo = usuario("a@example.com", "67996122809");
+        var dados = new java.util.HashMap<>(repository.entityToMap(antigo));
+        dados.put("nome", "!!!");
+        db.collection("usuarios").document(antigo.getId().toString()).set(dados).get();
+        Exception erro = assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> aguardar(repository.cadastrar(usuario("b@example.com", "67996122810"))));
+        assertInstanceOf(IllegalArgumentException.class, causa(erro));
+        assertEquals(1, db.collection("usuarios").get().get().size());
+        assertEquals(0, db.collection("valores_unicos").get().get().size());
+        assertEquals(0, db.collection("valores_unicos_controle").get().get().size());
+    }
+
+    @Test
+    void consultasUsamAsMesmasRegrasDoDominioParaEntradasNaoNormalizadas() throws Exception {
+        Usuario a = usuario("a@example.com", "67996122809");
+        aguardar(repository.cadastrar(a));
+        assertEquals(a.getId(), aguardar(repository.buscarPorEmail(" A@Example.com ")).orElseThrow().getId());
+        assertEquals(a.getId(), aguardar(repository.buscarPorTelefone("(67) 99612-2809")).orElseThrow().getId());
+    }
+
+    private Usuario gravarUsuarioAntigo() throws Exception {
+        Usuario antigo = usuario("a@example.com", "67996122809");
+        var dados = new java.util.HashMap<>(repository.entityToMap(antigo));
+        dados.put("email", "A@Example.com");
+        dados.put("telefone", "(67) 99612-2809");
+        db.collection("usuarios").document(antigo.getId().toString()).set(dados).get();
+        return antigo;
+    }
+
+    @Test
     void primeiraAtualizacaoMigraELiberaReservasAntigas() throws Exception {
         Usuario antigo = usuario("a@example.com", "67996122809");
         db.collection("usuarios").document(antigo.getId().toString()).set(repository.entityToMap(antigo)).get();
@@ -275,12 +329,12 @@ class UsuarioFirestoreRepositoryTest {
     void falhaAposAgendarEscritasDesfazUsuarioEReservas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var valores = new ValoresUnicosFirestoreRepository(db);
+        var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "novo@example.com", a.getId().toString());
-            reservas.liberar("usuario", "email", a.getEmail(), a.getId().toString());
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "novo@example.com", a.getId().toString());
+            reservas.release("usuario", "email", a.getEmail(), a.getId().toString());
+            reservas.apply();
             transaction.update(db.collection("usuarios").document(a.getId().toString()), "email", "novo@example.com");
             throw new IllegalStateException("Falha simulada antes do commit");
         });
@@ -295,12 +349,12 @@ class UsuarioFirestoreRepositoryTest {
     void falhaNoCommitNaoAplicaNenhumaDasEscritas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var valores = new ValoresUnicosFirestoreRepository(db);
+        var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
-            var reservas = valores.naTransacao(transaction);
-            reservas.reservar("usuario", "email", "novo@example.com", a.getId().toString());
-            reservas.liberar("usuario", "email", a.getEmail(), a.getId().toString());
-            reservas.aplicar();
+            var reservas = valores.inTransaction(transaction);
+            reservas.reserve("usuario", "email", "novo@example.com", a.getId().toString());
+            reservas.release("usuario", "email", a.getEmail(), a.getId().toString());
+            reservas.apply();
             transaction.update(db.collection("usuarios").document(a.getId().toString()), "email", "novo@example.com");
             // update exige um documento existente: o servidor deve rejeitar o commit inteiro.
             transaction.update(db.collection("falhas_de_teste").document("inexistente"), "valor", 1);

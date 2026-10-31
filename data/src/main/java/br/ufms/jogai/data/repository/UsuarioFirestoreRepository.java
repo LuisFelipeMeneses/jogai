@@ -1,6 +1,6 @@
 package br.ufms.jogai.data.repository;
 
-import br.ufms.jogai.data.firebase.FirestoreRepositoryComValoresUnicos;
+import br.ufms.jogai.data.firebase.FirestoreRepository;
 import br.ufms.jogai.data.firebase.config.FirebaseConfig;
 import br.ufms.jogai.domain.usuario.StatusUsuario;
 import br.ufms.jogai.domain.usuario.Usuario;
@@ -13,26 +13,24 @@ import com.google.cloud.Timestamp;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
-public class UsuarioFirestoreRepository extends FirestoreRepositoryComValoresUnicos<Usuario, UUID> implements UsuarioRepository {
+public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUID> implements UsuarioRepository {
 
     public UsuarioFirestoreRepository() {
         this(FirebaseConfig.getFirestore());
     }
 
     public UsuarioFirestoreRepository(Firestore firestore) {
-        super(Objects.requireNonNull(firestore).collection("usuarios"), "usuario", Map.of(
-                "email", UsuarioFirestoreRepository::normalizarEmail,
-                "telefone", Validar::telefone
-        ));
+        super(Objects.requireNonNull(firestore).collection("usuarios"), "usuario", Set.of("email", "telefone"));
     }
 
     @Override
-    protected RuntimeException conflitoUnico(String campo) {
-        return new UsuarioDuplicadoException(campo);
+    public CompletableFuture<Usuario> cadastrar(Usuario usuario) {
+        return create(usuario);
     }
 
-    private static String normalizarEmail(String email) {
-        return Validar.email(Objects.requireNonNull(email).strip()).toLowerCase(Locale.ROOT);
+    @Override
+    protected RuntimeException duplicateValueException(String campo) {
+        return new UsuarioDuplicadoException(campo);
     }
 
     @Override
@@ -74,7 +72,7 @@ public class UsuarioFirestoreRepository extends FirestoreRepositoryComValoresUni
     public CompletableFuture<Optional<Usuario>> buscarPorEmail(String email) {
         Objects.requireNonNull(email);
 
-        return queryOne(collection.whereEqualTo("email", normalizarEmail(email)));
+        return queryOne(collection.whereEqualTo("email", Usuario.normalizarEmail(email)));
     }
 
     @Override
