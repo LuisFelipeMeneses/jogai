@@ -56,7 +56,7 @@ public class ValidadorString extends Validador<String, ValidadorString> {
      *                         021.357.301-65 -> 02135730165. Dessa forma, o validador receberá o valor já convertido.
      */
     ValidadorString(String campo, String valor, boolean obrigatorio, Function<String, String> converterEntrada) {
-        super(campo, Optional.ofNullable(converterEntrada).map(f -> f.apply(valor)).orElse(valor), obrigatorio);
+        super(campo, converterEntrada == null ? valor : converterEntrada.apply(valor), obrigatorio);
 
         this.valorTratado = Optional.ofNullable(this.valor).orElse("");
     }
@@ -89,7 +89,7 @@ public class ValidadorString extends Validador<String, ValidadorString> {
     }
 
     public ValidadorString validarPorExpressao(String regex, String msgErro) {
-        if (obrigatorio && regex != null && !getValor().matches(regex)) {
+        if ((obrigatorio || !getValor().isEmpty()) && regex != null && !getValor().matches(regex)) {
             msgErro = msgErro != null ? "\n" + msgErro.trim() : "";
             throw new IllegalArgumentException(String.format("%s inválido: [%s]%s", campo, valor, msgErro));
         }

@@ -1,9 +1,11 @@
 package br.ufms.jogai.domain.util;
 
+import java.text.Normalizer;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Year;
-import java.util.Arrays;
+import java.util.Set;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -44,12 +46,14 @@ public class Validar {
      * @throws IllegalArgumentException caso o nome da pessoa seja inválido
      */
     public static String nomePessoa(String nome, boolean completo) {
-        return new ValidadorString("Nome", nome)
+        String normalizado = nome == null ? null : Normalizer.normalize(nome, Normalizer.Form.NFC);
+        String parte = "[\\p{L}][\\p{L}\\p{M}]*(?:[-'’][\\p{L}][\\p{L}\\p{M}]*)*";
+        return new ValidadorString("Nome", normalizado)
                 .validarNulo()
-                .validarPorExpressao("^[a-zA-ZÀ-ÖØ-öø-ÿ -]+$", "Caracteres não permitidos")
+                .validarPorExpressao(parte + "(?: +" + parte + ")*", "Caracteres ou separadores não permitidos")
                 .validarTamanho(3, 50)
-                .validarValor(nomeCompleto -> {
-                    if (completo && nomeCompleto.split(" ").length < 2) {
+                .validarValor(valor -> {
+                    if (completo && valor.split(" +").length < 2) {
                         throw new IllegalArgumentException("Nome incompleto. Informe o sobrenome");
                     }
                 }).getValor(ValidadorString::removerEspacosAdicionais);
@@ -76,10 +80,7 @@ public class Validar {
      * @return nome validado
      */
     public static String nomeJogo(String nome) {
-        return new ValidadorString("Nome do jogo", nome)
-                .validarNulo()
-                .validarTamanho(1, 50)
-                .getValor(ValidadorString::removerEspacosAdicionais);
+        return nomeCatalogo(nome, "Nome do jogo", 1, 50);
     }
 
     /**
@@ -89,10 +90,7 @@ public class Validar {
      * @return nome validado
      */
     public static String nomeEditora(String nome) {
-        return new ValidadorString("Nome da editora", nome)
-                .validarNulo()
-                .validarTamanho(1, 50)
-                .getValor(ValidadorString::removerEspacosAdicionais);
+        return nomeCatalogo(nome, "Nome da editora", 1, 50);
     }
 
     /**
@@ -102,10 +100,41 @@ public class Validar {
      * @return nome da categoria validado
      */
     public static String nomeCategoriaJogo(String nome) {
-        return new ValidadorString("Nome da categoria", nome)
-                .validarNulo()
-                .validarTamanho(2, 30)
+        return nomeCatalogo(nome, "Nome da categoria", 2, 30);
+    }
+
+    private static String nomeCatalogo(String valor, String campo, int minimo, int maximo) {
+        if (valor != null && valor.codePoints().anyMatch(c -> Character.isISOControl(c)
+                || Character.getType(c) == Character.FORMAT
+                || Character.getType(c) == Character.LINE_SEPARATOR
+                || Character.getType(c) == Character.PARAGRAPH_SEPARATOR)) {
+            throw new IllegalArgumentException(campo + " contém caracteres não permitidos");
+        }
+        if (valor != null && valor.codePoints().allMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c))) {
+            throw new IllegalArgumentException(campo + " não pode estar em branco");
+        }
+        return new ValidadorString(campo, valor).validarNulo().validarTamanho(minimo, maximo)
                 .getValor(ValidadorString::removerEspacosAdicionais);
+    }
+
+    public static String chaveCategoria(String chave) {
+        Objects.requireNonNull(chave, "O id não pode ser nulo");
+        return nomeCatalogo(chave, "Chave da categoria", 1, Integer.MAX_VALUE);
+    }
+
+    public static Instant dataCadastro(Instant data) {
+        Objects.requireNonNull(data, "A data de cadastro não pode ser nula");
+        if (data.isAfter(Instant.now())) {
+            throw new IllegalArgumentException("A data de cadastro não pode ser futura");
+        }
+        return data;
+    }
+
+    public static <T> Set<T> categoriasJogo(Set<T> categorias) {
+        if (categorias == null || categorias.isEmpty() || categorias.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("O jogo deve possuir pelo menos uma categoria e nenhuma categoria nula");
+        }
+        return Set.copyOf(categorias);
     }
 
     /**
@@ -115,7 +144,7 @@ public class Validar {
      * @return o ano de lançamento
      */
     public static Year anoLancamentoJogo(Integer anoLancamento) {
-        return anoLancamentoJogo(Year.of(anoLancamento));
+        return anoLancamentoJogo(anoLancamento == null ? null : Year.of(anoLancamento));
     }
 
     /**
@@ -126,7 +155,7 @@ public class Validar {
      * @return o ano de lançamento
      */
     public static Year anoLancamentoJogo(Integer anoLancamento, boolean obrigatorio) {
-        return anoLancamentoJogo(Year.of(anoLancamento), obrigatorio);
+        return anoLancamentoJogo(anoLancamento == null ? null : Year.of(anoLancamento), obrigatorio);
     }
 
     public static Year anoLancamentoJogo(Year anoLancamento) {
@@ -197,15 +226,11 @@ public class Validar {
      * @throws IllegalArgumentException caso o número de telefone seja inválido
      */
     public static String telefone(String telefone, boolean obrigatorio) {
-        String regex = new StringBuilder()
-                .append("\\d{2}[1-8]\\d{7}|")                   // ##########
-                .append("\\d{2}9\\d{8}|")                       // ##9########
-                .append("\\(\\d{2}\\)\\s[1-8]\\d{3}-\\d{4}|")   // (##) ####-####
-                .append("\\(\\d{2}\\)\\s9\\d{4}-\\d{4}|")       // (##) 9####-####
-                .append("\\+55\\s\\d{2}\\s[1-8]\\d{3}-\\d{4}|") // +55 ## ####-####
-                .append("\\+55\\s\\d{2}\\s9\\d{4}-\\d{4}")      // +55 ## 9####-####
-                .toString();
-
+        String ddd = "(?:1[1-9]|2[12478]|3[1-578]|4[1-9]|5[1345]|6[1-9]|7[134579]|8[1-9]|9[1-9])";
+        String assinante = "(?:[2-5]\\d{7}|9\\d{8})";
+        String formatado = "(?:[2-5]\\d{3}-\\d{4}|9\\d{4}-\\d{4})";
+        String regex = ddd + assinante + "|\\(" + ddd + "\\) " + formatado
+                + "|\\+55 " + ddd + " " + formatado;
         return new ValidadorString("Telefone", telefone, obrigatorio)
                 .validarNulo()
                 .validarPorExpressao(regex, "Use somente números ou algum formato de telefone brasileiro válido")
@@ -232,7 +257,9 @@ public class Validar {
      * @throws IllegalArgumentException caso o email seja inválido
      */
     public static String email(String email, boolean obrigatorio) {
-        String regex = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$";
+        String local = "[a-zA-Z0-9_%+-]+(?:\\.[a-zA-Z0-9_%+-]+)*";
+        String rotulo = "[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?";
+        String regex = "^" + local + "@(?:" + rotulo + "\\.)+[a-zA-Z]{2,63}$";
         return new ValidadorString("Email", email, obrigatorio)
                 .validarNulo()
                 .validarTamanho(3, 50)
@@ -303,8 +330,15 @@ public class Validar {
      * @throws IllegalArgumentException caso a data de nascimento seja inválida
      */
     public static LocalDate dataNascimento(LocalDate data, boolean obrigatorio) {
-        return estaEntrePeriodo("Data de nascimento", LocalDateTime.now().minusYears(150), data.atStartOfDay(),
-                LocalDateTime.now(), obrigatorio).toLocalDate();
+        if (data == null) {
+            if (obrigatorio) throw new IllegalArgumentException("A data de nascimento não pode ser nula");
+            return null;
+        }
+        LocalDate hoje = LocalDate.now();
+        if (data.isAfter(hoje) || data.isBefore(hoje.minusYears(150))) {
+            throw new IllegalArgumentException("Data de nascimento inválida");
+        }
+        return data;
     }
 
     /**

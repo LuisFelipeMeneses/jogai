@@ -2,6 +2,7 @@ package br.ufms.jogai.data.repository;
 
 import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
+import br.ufms.jogai.domain.usuario.StatusUsuario;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import org.junit.jupiter.api.AfterEach;
@@ -13,6 +14,8 @@ import java.time.LocalDate;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+
+import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,10 +41,35 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     @Test
+    void paginacaoMantemFiltrosDeNomeEStatus() throws Exception {
+        var ana = usuario("ana@example.com", "67996122801");
+        ana.setNome("Ana Abreu");
+        var outraAna = usuario("outra@example.com", "67996122802");
+        outraAna.setNome("Ana Beatriz");
+        outraAna.inativar();
+        var bruno = usuario("bruno@example.com", "67996122803");
+        bruno.setNome("Bruno Castro");
+        aguardar(repository.cadastrarTodos(java.util.List.of(ana, outraAna, bruno)));
+
+        var nomes = aguardar(repository.listarPorNome("Ana", 1));
+        assertEquals(java.util.List.of(ana.getId()), nomes.items().stream().map(Usuario::getId).toList());
+        var proxima = aguardar(repository.listarPorNome("Ana", 1, nomes.nextCursor().orElseThrow()));
+        assertEquals(java.util.List.of(outraAna.getId()), proxima.items().stream().map(Usuario::getId).toList());
+        assertTrue(proxima.nextCursor().isEmpty());
+
+        var ativos = aguardar(repository.listarPorStatus(StatusUsuario.ATIVO, 1));
+        var restantes = aguardar(repository.listarPorStatus(StatusUsuario.ATIVO, 1,
+                ativos.nextCursor().orElseThrow()));
+        assertEquals(java.util.Set.of(ana.getId(), bruno.getId()),
+                java.util.Set.of(ativos.items().getFirst().getId(), restantes.items().getFirst().getId()));
+        assertTrue(restantes.nextCursor().isEmpty());
+    }
+
+    @Test
     void rejeitaEmailDuplicadoSemDiferenciarMaiusculas() throws Exception {
         aguardar(repository.cadastrar(usuario("Pessoa@Example.com", "67996122809")));
         duplicado("email", repository.cadastrar(usuario("pessoa@example.com", "67996122810")));
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertEquals(1, quantidadeReservas("telefone"));
     }
 
@@ -70,14 +98,14 @@ class UsuarioFirestoreRepositoryTest {
     void reservaSemProprietarioNaoEhConfundidaComDocumentoAusenteNaLeituraProjetada() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var email = db.collection("valores_unicos").whereEqualTo("campo", "email")
+        var email = db.collection(COLLECTION_PATH).whereEqualTo("campo", "email")
                 .get().get().getDocuments().getFirst();
         email.getReference().update("entidadeId", com.google.cloud.firestore.FieldValue.delete()).get();
         a.setNome("Outro Nome");
         duplicado("email", repository.save(a));
         assertEquals("Pessoa Exemplo", aguardar(repository.get(a.getId())).orElseThrow().getNome());
         assertNull(email.getReference().get().get().getString("entidadeId"));
-        assertEquals(2, db.collection("valores_unicos").get().get().size());
+        assertEquals(2, db.collection(COLLECTION_PATH).get().get().size());
     }
 
     @Test
@@ -97,16 +125,15 @@ class UsuarioFirestoreRepositoryTest {
             else assertEquals("email", assertInstanceOf(UsuarioDuplicadoException.class, causa(erro)).getCampo());
         }
         assertEquals(1, concluidos);
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertReservasConsistentes();
     }
 
     @Test
-    void alterarSomenteNomeNaoRegravaReservasNemControle() throws Exception {
+    void alterarSomenteNomeNaoRegravaReservas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var reservasAntes = db.collection("valores_unicos").get().get().getDocuments();
-        var controleAntes = db.collection("valores_unicos_controle").get().get().getDocuments().getFirst();
+        var reservasAntes = db.collection(COLLECTION_PATH).get().get().getDocuments();
 
         a.setNome("Outro Nome");
         aguardar(repository.save(a));
@@ -116,7 +143,6 @@ class UsuarioFirestoreRepositoryTest {
             assertEquals(reserva.getUpdateTime(), reserva.getReference().get().get().getUpdateTime(),
                     "Uma reserva inalterada não deve ser regravada");
         }
-        assertEquals(controleAntes.getUpdateTime(), controleAntes.getReference().get().get().getUpdateTime());
         assertReservasConsistentes();
     }
 
@@ -124,7 +150,7 @@ class UsuarioFirestoreRepositoryTest {
     void alterarEmailNaoRegravaReservaDoTelefone() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var telefoneAntes = db.collection("valores_unicos").whereEqualTo("campo", "telefone")
+        var telefoneAntes = db.collection(COLLECTION_PATH).whereEqualTo("campo", "telefone")
                 .get().get().getDocuments().getFirst();
         a.setEmail("novo@example.com");
         aguardar(repository.save(a));
@@ -137,7 +163,7 @@ class UsuarioFirestoreRepositoryTest {
     void salvarValorInalteradoAindaRecriaReservaAusente() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
-        var telefone = db.collection("valores_unicos").whereEqualTo("campo", "telefone")
+        var telefone = db.collection(COLLECTION_PATH).whereEqualTo("campo", "telefone")
                 .get().get().getDocuments().getFirst();
         telefone.getReference().delete().get();
         aguardar(repository.save(a));
@@ -153,7 +179,7 @@ class UsuarioFirestoreRepositoryTest {
         usuario.setTelefone("67996122810");
         aguardar(repository.save(usuario));
         aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
-        assertEquals(2, aguardar(repository.getAll()).size());
+        assertEquals(2, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         duplicado("email", repository.cadastrar(usuario("b@example.com", "67996122811")));
     }
 
@@ -183,56 +209,6 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     @Test
-    void protegeUsuariosAntigosSemReservas() throws Exception {
-        Usuario antigo = usuario("a@example.com", "67996122809");
-        var dados = new java.util.HashMap<>(repository.entityToMap(antigo));
-        dados.put("email", "A@Example.com");
-        dados.put("telefone", "(67) 99612-2809");
-        db.collection("usuarios").document(antigo.getId().toString()).set(dados).get();
-        duplicado("email", repository.cadastrar(usuario("a@example.com", "67996122810")));
-        duplicado("telefone", repository.cadastrar(usuario("b@example.com", "67996122809")));
-        aguardar(repository.save(antigo));
-        assertEquals(1, quantidadeReservas("email"));
-    }
-
-    @Test
-    void atualizaDocumentoAntigoUsandoNormalizacaoDoDominioParaLiberarReservas() throws Exception {
-        Usuario antigo = gravarUsuarioAntigo();
-        // Inicializa reservas sem regravar o documento legado.
-        aguardar(repository.cadastrar(usuario("b@example.com", "67996122810")));
-        antigo.setEmail("novo@example.com");
-        antigo.setTelefone("67996122811");
-        aguardar(repository.save(antigo));
-        assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
-        assertReservasConsistentes();
-    }
-
-    @Test
-    void excluiDocumentoAntigoLiberandoAsReservasCanonicas() throws Exception {
-        Usuario antigo = gravarUsuarioAntigo();
-        aguardar(repository.cadastrar(usuario("b@example.com", "67996122810")));
-        aguardar(repository.delete(antigo.getId()));
-        assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
-        assertReservasConsistentes();
-    }
-
-    @Test
-    void dominioRejeitaDocumentoAntigoInvalidoSemEscritasParciais() throws Exception {
-        Usuario antigo = usuario("a@example.com", "67996122809");
-        var dados = new java.util.HashMap<>(repository.entityToMap(antigo));
-        dados.put("nome", "!!!");
-        db.collection("usuarios").document(antigo.getId().toString()).set(dados).get();
-        Exception erro = assertThrows(java.util.concurrent.ExecutionException.class,
-                () -> aguardar(repository.cadastrar(usuario("b@example.com", "67996122810"))));
-        assertInstanceOf(IllegalArgumentException.class, causa(erro));
-        assertEquals(1, db.collection("usuarios").get().get().size());
-        assertEquals(0, db.collection("valores_unicos").get().get().size());
-        assertEquals(0, db.collection("valores_unicos_controle").get().get().size());
-    }
-
-    @Test
     void consultasUsamAsMesmasRegrasDoDominioParaEntradasNaoNormalizadas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         aguardar(repository.cadastrar(a));
@@ -240,42 +216,8 @@ class UsuarioFirestoreRepositoryTest {
         assertEquals(a.getId(), aguardar(repository.buscarPorTelefone("(67) 99612-2809")).orElseThrow().getId());
     }
 
-    private Usuario gravarUsuarioAntigo() throws Exception {
-        Usuario antigo = usuario("a@example.com", "67996122809");
-        var dados = new java.util.HashMap<>(repository.entityToMap(antigo));
-        dados.put("email", "A@Example.com");
-        dados.put("telefone", "(67) 99612-2809");
-        db.collection("usuarios").document(antigo.getId().toString()).set(dados).get();
-        return antigo;
-    }
-
     @Test
-    void primeiraAtualizacaoMigraELiberaReservasAntigas() throws Exception {
-        Usuario antigo = usuario("a@example.com", "67996122809");
-        db.collection("usuarios").document(antigo.getId().toString()).set(repository.entityToMap(antigo)).get();
-        antigo.setEmail("b@example.com");
-        antigo.setTelefone("67996122810");
-        aguardar(repository.save(antigo));
-        assertEquals(1, quantidadeReservas("email"));
-        assertEquals(1, quantidadeReservas("telefone"));
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
-    }
-
-    @Test
-    void migracaoRejeitaDuplicidadePreexistenteSemEscritasParciais() throws Exception {
-        Usuario a = usuario("a@example.com", "67996122809");
-        Usuario b = usuario("a@example.com", "67996122810");
-        db.collection("usuarios").document(a.getId().toString()).set(repository.entityToMap(a)).get();
-        db.collection("usuarios").document(b.getId().toString()).set(repository.entityToMap(b)).get();
-        duplicado("email", repository.cadastrar(usuario("c@example.com", "67996122811")));
-        assertEquals(2, aguardar(repository.getAll()).size());
-        assertEquals(0, quantidadeReservas("email"));
-        assertEquals(0, db.collection("usuarios_indices").get().get().size());
-        assertEquals(0, db.collection("valores_unicos_controle").get().get().size());
-    }
-
-    @Test
-    void concorrenciaTambemEhProtegidaAposInicializacao() throws Exception {
+    void concorrenciaContinuaProtegidaAposExcluirTodosOsUsuarios() throws Exception {
         Usuario inicial = usuario("inicial@example.com", "67996122811");
         aguardar(repository.cadastrar(inicial));
         aguardar(repository.delete(inicial.getId()));
@@ -359,7 +301,7 @@ class UsuarioFirestoreRepositoryTest {
         var resultadoA = repository.save(a).handle((usuario, erro) -> erro);
         var resultadoB = repository.save(b).handle((usuario, erro) -> erro);
         apenasUmVencedor(campo, aguardar(resultadoA), aguardar(resultadoB));
-        assertEquals(2, aguardar(repository.getAll()).size());
+        assertEquals(2, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertReservasConsistentes();
     }
 
@@ -388,20 +330,8 @@ class UsuarioFirestoreRepositoryTest {
         var segunda = repository.save(b);
         aguardar(primeira);
         aguardar(segunda);
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertReservasConsistentes();
-    }
-
-    @Test
-    void migraMesmoQuandoMarcadorDaVersaoAnteriorExiste() throws Exception {
-        Usuario antigo = usuario("a@example.com", "67996122809");
-        db.collection("usuarios").document(antigo.getId().toString()).set(repository.entityToMap(antigo)).get();
-        db.collection("usuarios_indices").document("unicidade_v1").set(java.util.Map.of("versao", 1)).get();
-        aguardar(repository.cadastrar(usuario("b@example.com", "67996122810")));
-        assertEquals(1, db.collection("valores_unicos_controle").get().get().size());
-        assertReservasConsistentes();
-        duplicado("email", repository.cadastrar(usuario("a@example.com", "67996122811")));
-        duplicado("telefone", repository.cadastrar(usuario("c@example.com", "67996122809")));
     }
 
     @Test
@@ -411,8 +341,8 @@ class UsuarioFirestoreRepositoryTest {
         var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
             var reservas = valores.inTransaction(transaction);
-            reservas.reserve("usuario", "email", "novo@example.com", a.getId().toString());
-            reservas.release("usuario", "email", a.getEmail(), a.getId().toString());
+            reservas.reserve("usuarios", "email", "novo@example.com", a.getId().toString());
+            reservas.release("usuarios", "email", a.getEmail(), a.getId().toString());
             reservas.apply();
             transaction.update(db.collection("usuarios").document(a.getId().toString()), "email", "novo@example.com");
             throw new IllegalStateException("Falha simulada antes do commit");
@@ -431,8 +361,8 @@ class UsuarioFirestoreRepositoryTest {
         var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
             var reservas = valores.inTransaction(transaction);
-            reservas.reserve("usuario", "email", "novo@example.com", a.getId().toString());
-            reservas.release("usuario", "email", a.getEmail(), a.getId().toString());
+            reservas.reserve("usuarios", "email", "novo@example.com", a.getId().toString());
+            reservas.release("usuarios", "email", a.getEmail(), a.getId().toString());
             reservas.apply();
             transaction.update(db.collection("usuarios").document(a.getId().toString()), "email", "novo@example.com");
             // update exige um documento existente: o servidor deve rejeitar o commit inteiro.
@@ -459,21 +389,21 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     private int quantidadeReservas(String campo) throws Exception {
-        return db.collection("valores_unicos").whereEqualTo("entidade", "usuario")
+        return db.collection(COLLECTION_PATH).whereEqualTo("entidade", "usuarios")
                 .whereEqualTo("campo", campo).get().get().size();
     }
 
     private void assertReservasConsistentes() throws Exception {
-        var usuarios = aguardar(repository.getAll());
-        var reservas = db.collection("valores_unicos").get().get().getDocuments();
+        var usuarios = aguardar(repository.getPage(100).thenApply(page -> page.items()));
+        var reservas = db.collection(COLLECTION_PATH).get().get().getDocuments();
         assertEquals(usuarios.size() * 2, reservas.size(), "Não pode haver reservas órfãs ou ausentes");
         for (var usuario : usuarios) {
             for (var campo : java.util.Map.of("email", usuario.getEmail(), "telefone", usuario.getTelefone()).entrySet()) {
-                String chave = codificar("usuario") + "." + codificar(campo.getKey()) + "." + codificar(campo.getValue());
-                var reserva = db.collection("valores_unicos").document(chave).get().get();
+                String chave = codificar("usuarios") + "." + codificar(campo.getKey()) + "." + codificar(campo.getValue());
+                var reserva = db.collection(COLLECTION_PATH).document(chave).get().get();
                 assertTrue(reserva.exists(), "Reserva ausente: " + campo.getKey());
                 assertEquals(usuario.getId().toString(), reserva.getString("entidadeId"));
-                assertEquals("usuario", reserva.getString("entidade"));
+                assertEquals("usuarios", reserva.getString("entidade"));
                 assertEquals(campo.getKey(), reserva.getString("campo"));
             }
         }
@@ -499,7 +429,7 @@ class UsuarioFirestoreRepositoryTest {
         Throwable erroB = aguardar(resultadoB);
         apenasUmVencedor(campo, erroA, erroB);
         assertReservasConsistentes();
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertEquals(1, quantidadeReservas("email"));
         assertEquals(1, quantidadeReservas("telefone"));
     }

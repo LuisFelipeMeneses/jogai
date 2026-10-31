@@ -2,6 +2,7 @@ package br.ufms.jogai.data.exemplo;
 
 import br.ufms.jogai.data.firebase.FirestoreRepository;
 import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.CollectionReference;
 
 import java.util.Map;
 import java.util.Set;
@@ -13,6 +14,11 @@ public final class CategoriaExemploRepository extends FirestoreRepository<Catego
     public CategoriaExemploRepository(Firestore firestore) {
         super(firestore.collection("categorias_exemplo"), "categoria_exemplo",
                 Set.of("codigo"));
+    }
+
+    /** Configura uma coleção ou subcoleção, com código único dentro do caminho completo. */
+    public CategoriaExemploRepository(CollectionReference collection) {
+        super(collection, Set.of("codigo"));
     }
 
     @Override

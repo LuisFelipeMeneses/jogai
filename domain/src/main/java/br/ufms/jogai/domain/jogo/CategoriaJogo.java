@@ -3,7 +3,6 @@ package br.ufms.jogai.domain.jogo;
 import br.ufms.jogai.domain.shared.Entidade;
 import br.ufms.jogai.domain.util.Validar;
 
-import java.util.UUID;
 
 public class CategoriaJogo extends Entidade<String> {
 
@@ -11,7 +10,7 @@ public class CategoriaJogo extends Entidade<String> {
     private String descricao;
 
     private CategoriaJogo(String id, String nome, String descricao) {
-        super(id);
+        super(Validar.chaveCategoria(id));
 
         setNome(nome);
         setDescricao(descricao);

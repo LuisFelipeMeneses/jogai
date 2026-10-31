@@ -15,18 +15,19 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Manages reservations for canonical String values in a caller-owned transaction.
- * This repository never starts or commits transactions. Existing collection and field names
+ * This repository never starts or commits transactions. Reservation field names
  * are retained for storage compatibility; Base64 encoding is reversible, not encryption.
  */
 public final class UniqueValuesFirestoreRepository {
 
     private static final Base64.Encoder KEY_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final FieldMask OWNER_MASK = FieldMask.of("entidadeId");
+
+    /** Shared collection name for persistence code and integration tests. */
+    public static final String COLLECTION_PATH = "_uniqueValues_";
 
     private final CollectionReference collection;
 
@@ -35,7 +36,7 @@ public final class UniqueValuesFirestoreRepository {
      * @param firestore the application-owned Firestore client
      */
     public UniqueValuesFirestoreRepository(Firestore firestore) {
-        collection = Objects.requireNonNull(firestore).collection("valores_unicos");
+        collection = Objects.requireNonNull(firestore).collection(COLLECTION_PATH);
     }
 
     /**
@@ -47,25 +48,9 @@ public final class UniqueValuesFirestoreRepository {
         return new Operation(Objects.requireNonNull(transaction));
     }
 
-    /**
-     * Builds a stable initialization marker for a collection, scope, and field set.
-     * @param collectionPath the entity collection path
-     * @param scope the unique namespace for that entity collection
-     * @param fields the constrained fields, sorted internally to make order irrelevant
-     * @return a document reference; this method performs no database access
-     */
-    public DocumentReference initializationMarker(String collectionPath, String scope, Set<String> fields) {
-        return collection.getFirestore().collection("valores_unicos_controle")
-                .document(key(Stream.concat(Stream.of(collectionPath, scope), fields.stream().sorted())));
-    }
-
     private DocumentReference reference(String scope, String field, String value) {
         // Encode each component separately to avoid ambiguous reservation keys.
         return collection.document(encode(scope) + "." + encode(field) + "." + encode(value));
-    }
-
-    private static String key(Stream<String> parts) {
-        return parts.map(UniqueValuesFirestoreRepository::encode).collect(Collectors.joining("."));
     }
 
     private static String encode(String value) {
@@ -155,15 +140,19 @@ public final class UniqueValuesFirestoreRepository {
             DocumentReference reference = reference(scope, field, value);
             DocumentSnapshot existing = read(reference);
             Reservation pending = pendingChanges.get(reference);
-            if ((existing.exists() && !entityId.equals(existing.getString("entidadeId")))
-                    || (pending != null && !entityId.equals(pending.entityId()))) {
+            if (pending != null) {
+                if (!entityId.equals(pending.entityId())) throw new DuplicateUniqueValueException(field);
+                return;
+            }
+            boolean released = pendingChanges.containsKey(reference);
+            if (existing.exists() && !entityId.equals(existing.getString("entidadeId")) && !released) {
                 throw new DuplicateUniqueValueException(field);
             }
-            if (existing.exists()) {
+            if (existing.exists() && entityId.equals(existing.getString("entidadeId"))) {
                 // Ownership was verified by a transactional read: do not rewrite an unchanged reservation.
                 // Also cancel any release scheduled earlier in this operation.
                 pendingChanges.remove(reference);
-            } else if (pending == null) {
+            } else {
                 pendingChanges.put(reference, new Reservation(scope, field, entityId));
             }
         }
@@ -185,10 +174,13 @@ public final class UniqueValuesFirestoreRepository {
             DocumentSnapshot existing = read(reference);
             Reservation pending = pendingChanges.get(reference);
             // Never release another entity's reservation, even if existing data is inconsistent.
-            if (entityId.equals(existing.getString("entidadeId"))) {
+            if (pending != null) {
+                if (entityId.equals(pending.entityId())) {
+                    if (existing.exists()) pendingChanges.put(reference, null);
+                    else pendingChanges.remove(reference);
+                }
+            } else if (entityId.equals(existing.getString("entidadeId"))) {
                 pendingChanges.put(reference, null);
-            } else if (pending != null && entityId.equals(pending.entityId())) {
-                pendingChanges.remove(reference);
             }
         }
 

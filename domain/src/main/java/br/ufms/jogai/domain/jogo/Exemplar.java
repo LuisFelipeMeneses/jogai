@@ -1,6 +1,8 @@
 package br.ufms.jogai.domain.jogo;
 
 import br.ufms.jogai.domain.shared.Entidade;
+import br.ufms.jogai.domain.util.Validar;
+import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioInfo;
 
 import java.time.Instant;
@@ -29,8 +31,17 @@ public class Exemplar extends Entidade<UUID> {
                 jogoInfo, "As informações do jogo não podem ser nulas");
         this.proprietario = Objects.requireNonNull(
                 proprietarioInfo, "As informações do proprietário do jogo não podem ser nulas");
-        this.dataCadastro = Objects.requireNonNull(
-                dataCadastro, "A data de cadastro não pode ser nula");
+        Validar.notNull(jogoInfo.id(), "O id do jogo não pode ser nulo");
+        Validar.nomeJogo(jogoInfo.nome());
+        Validar.nomeEditora(jogoInfo.editora());
+        Validar.categoriasJogo(jogoInfo.categorias());
+        Validar.notNull(proprietarioInfo.id(), "O id do proprietário não pode ser nulo");
+        Validar.nomePessoa(proprietarioInfo.nome(), true);
+        Validar.notNull(proprietarioInfo.email(), "O email do proprietário não pode ser nulo");
+        Usuario.normalizarEmail(proprietarioInfo.email());
+        Validar.telefone(proprietarioInfo.telefone());
+        Validar.dataNascimento(proprietarioInfo.dataNascimento());
+        this.dataCadastro = Validar.dataCadastro(dataCadastro);
 
         setEstadoConservacao(estadoConservacao);
         setObservacao(observacao);

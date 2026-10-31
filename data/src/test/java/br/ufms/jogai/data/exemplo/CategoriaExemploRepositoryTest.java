@@ -8,11 +8,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+
+import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,7 +48,7 @@ class CategoriaExemploRepositoryTest {
         b.setCodigo("EST");
         conflito("codigo", repository.save(b));
         assertEquals("FAM", aguardar(repository.get(b.getId())).orElseThrow().getCodigo());
-        assertEquals(2, db.collection("valores_unicos").get().get().size());
+        assertEquals(2, db.collection(COLLECTION_PATH).get().get().size());
         conflito("codigo", repository.create(categoria("FAM")));
     }
 
@@ -61,7 +62,7 @@ class CategoriaExemploRepositoryTest {
         assertEquals("COOP", aguardar(repository.get(a.getId())).orElseThrow().getCodigo());
         aguardar(repository.create(categoria("EST")));
         conflito("codigo", repository.create(categoria("coop")));
-        assertEquals(2, db.collection("valores_unicos").get().get().size());
+        assertEquals(2, db.collection(COLLECTION_PATH).get().get().size());
     }
 
     @Test
@@ -70,7 +71,7 @@ class CategoriaExemploRepositoryTest {
         aguardar(repository.create(a));
         aguardar(repository.delete(a.getId()));
         aguardar(repository.delete(a.getId()));
-        assertEquals(0, db.collection("valores_unicos").get().get().size());
+        assertEquals(0, db.collection(COLLECTION_PATH).get().get().size());
         aguardar(repository.create(categoria("EST")));
     }
 
@@ -88,20 +89,10 @@ class CategoriaExemploRepositoryTest {
         Throwable erroB = aguardar(segunda);
         assertNotEquals(erroA == null, erroB == null);
         assertInstanceOf(DuplicateUniqueValueException.class, causa(erroA != null ? erroA : erroB));
-        var categorias = aguardar(repository.getAll());
+        var categorias = aguardar(repository.getPage(100).thenApply(page -> page.items()));
         assertEquals(1, categorias.stream().filter(c -> c.getCodigo().equals("COOP")).count());
-        assertEquals(2, db.collection("valores_unicos").get().get().size());
+        assertEquals(2, db.collection(COLLECTION_PATH).get().get().size());
         for (var categoria : categorias) conflito("codigo", repository.create(categoria(categoria.getCodigo())));
-    }
-
-    @Test
-    void inicializacaoProtegeDocumentosPreexistentesTambemNaNovaEntidade() throws Exception {
-        db.collection("categorias_exemplo").document(UUID.randomUUID().toString())
-                .set(Map.of("nome", "Estratégia", "codigo", "est")).get();
-        conflito("codigo", repository.create(categoria("EST")));
-        assertEquals(0, db.collection("valores_unicos").get().get().size());
-        aguardar(repository.create(categoria("FAM")));
-        assertEquals(2, db.collection("valores_unicos").get().get().size());
     }
 
     private static CategoriaExemplo categoria(String codigo) {

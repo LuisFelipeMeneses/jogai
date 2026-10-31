@@ -8,19 +8,31 @@ Nenhum service precisa calcular chaves ou manter reservas.
 ## Configuração mínima
 
 ```java
-super(firestore.collection("usuarios"), "usuario", Set.of("email", "telefone"));
+super(firestore.collection("usuarios"), Set.of("email", "telefone"));
 ```
 
-Os argumentos são a coleção dos documentos, o escopo de exclusividade e o conjunto
-de nomes dos campos únicos. Os nomes devem coincidir com os campos
+Os argumentos são a coleção dos documentos e o conjunto de nomes dos campos
+únicos. O escopo é derivado de `collection.getPath()`; para os usuários na raiz,
+ele é `usuarios`. Os nomes dos campos devem coincidir com os campos
 persistidos por `entityToMap`. Cada campo é único independentemente dos demais.
 Valores iguais em escopos ou campos distintos não colidem.
+
+Para usar automaticamente o caminho completo da coleção como escopo, prefira
+`super(collectionReference, Set.of("email", "telefone"))`. Isso funciona também
+para subcoleções, com unicidade independente para cada caminho de coleção.
+Passe somente o nome simples do documento como ID; IDs contendo `/` são rejeitados.
+Para operações conjuntas em coleções e subcoleções, use `writeTransaction` com
+os repositórios correspondentes, como no [exemplo de hierarquia](multi-document-transactions.md).
 
 O escopo deve ser exclusivo e estável para a entidade/repositório. Não reutilize
 o mesmo escopo em coleções independentes: os IDs dos proprietários poderiam
 coincidir e tornar as reservas ambíguas. Para um repositório novo, usar o próprio
-caminho da coleção como escopo é uma convenção possível. O usuário mantém
-`usuario` para preservar as reservas anteriores.
+caminho da coleção como escopo é o padrão. O construtor de três argumentos
+continua disponível para escopos explícitos.
+
+Trocar o escopo em uma base populada altera as chaves das reservas. Reservas
+criadas com o escopo anterior `usuario` precisam ser ajustadas antes de habilitar
+gravações com o escopo `usuarios`; a alteração do construtor não migra o banco.
 
 A entidade de domínio é responsável por validar e normalizar seus valores ao
 criar, alterar e reconstituir objetos. A classe base não recebe funções de
@@ -28,11 +40,10 @@ normalização: usa os campos canônicos produzidos por `entityToMap` e verifica
 os campos configurados existem como String. O mapeamento deve preservar os
 valores do domínio.
 
-Para documentos preexistentes, a classe base chama `mapToEntity` antes de extrair
-as reservas, tanto na inicialização quanto na alteração ou exclusão. Isso aplica
-as invariantes do domínio aos dados legados sem duplicar as regras no módulo
-`data`. Se os dados antigos forem inválidos, a operação falha sem escritas
-parciais; a correção deve ser feita por migração.
+Em alterações e exclusões, os valores únicos anteriores são extraídos diretamente
+dos campos persistidos, sem reconstruir uma entidade antiga. O contrato assume
+uma base inicialmente limpa e mapeamentos que preservam os valores canônicos do
+domínio, com todas as escritas seguindo o protocolo de reservas.
 
 Consultas que recebem uma String, como `buscarPorEmail`, ainda precisam tratar
 essa entrada. Elas reutilizam a regra do domínio (`Usuario.normalizarEmail`),
@@ -53,7 +64,7 @@ public CategoriaRepository(Firestore firestore) {
 ```
 
 O construtor simples equivale a configurar um conjunto vazio de campos únicos.
-Não há consultas a reservas, inicialização de índices auxiliares nem transações
+Não há consultas a reservas nem transações
 com múltiplos documentos. `create` usa a precondição atômica de `create` para
 rejeitar um ID existente. `save` usa `set` para criar ou atualizar. `delete` faz
 uma exclusão direta, inclusive quando o documento já não existe.
@@ -161,7 +172,7 @@ public final class CategoriaExemploRepository extends FirestoreRepository<Catego
 O repositório não implementa manualmente `create`, `save` nem `delete`:
 esses métodos finais são herdados da classe base. Eles são finais para evitar
 substituir acidentalmente a persistência protegida por uma gravação simples.
-`get`, `getAll` e os métodos auxiliares de consultas continuam disponíveis.
+`get`, `getPage` e os métodos auxiliares de consultas limitadas estão disponíveis.
 
 O repositório concreto implementa apenas dois mapeamentos:
 
@@ -223,10 +234,12 @@ encapsulado por exceções assíncronas; a aplicação deve examinar suas causas
 ## Como a atualização permanece atômica
 
 1. A classe base captura os valores já normalizados pela entidade.
-2. A transação lê o documento persistido e o controle de inicialização.
-3. A operação de reservas verifica todos os valores novos. Uma reserva do próprio
-   ID é aceita; a de outro ID causa conflito.
-4. A operação prepara a liberação somente dos valores antigos que mudaram.
+2. A transação lê o documento persistido e extrai seus valores únicos anteriores.
+3. O plano prepara em memória a liberação dos valores anteriores dos documentos participantes.
+4. A operação verifica os valores finais e prepara suas reservas. Um valor de outro
+   proprietário só pode ser transferido se esse proprietário o liberou no mesmo plano.
+   Duas entidades não podem reivindicar o mesmo valor final. Reservas inalteradas
+   permanecem sem regravação.
 5. Terminadas todas as leituras, agenda as reservas e o documento na transação.
 6. O Firestore confirma tudo junto. Qualquer falha impede todas as gravações.
 
@@ -235,23 +248,17 @@ O componente de valores únicos não oferece um simples `isUnique` seguido de
 vinculada à operação transacional de reserva. Cada repetição do callback cria uma
 operação nova, evitando reutilizar estado de uma tentativa abortada.
 
-## Inicialização e evolução
+## Contrato de persistência
 
-Na primeira gravação, a classe base também reserva os valores dos documentos
-preexistentes, sem confirmar alterações parciais. Se já existirem duplicidades,
-a inicialização falha e elas precisam ser resolvidas antes de prosseguir.
+Nenhuma inicialização administrativa é necessária. O primeiro cadastro cria as
+reservas no mesmo commit do documento, inclusive quando várias instâncias do
+repositório gravam simultaneamente numa base vazia. Não há coleção de controle,
+varredura da coleção ou suporte a documentos legados sem reservas. A configuração
+dos campos únicos, seu escopo e a normalização devem permanecer coerentes entre
+todos os escritores e os dados persistidos.
 
-Os documentos de `valores_unicos_controle` identificam a coleção, o escopo e os
-nomes dos campos, em ordem estável. Adicionar um campo muda esse controle e exige
-verificar os documentos existentes novamente. Remover um campo ou alterar sua
-normalização requer uma migração planejada, incluindo limpeza das reservas
-obsoletas; isso não é detectado nem resolvido automaticamente. Mudar o escopo
-significa criar outro espaço de exclusividade e também exige planejamento.
-
-A inicialização automática atende à base inicial do projeto. Bases grandes
-precisam de migração administrativa por causa dos limites transacionais. Todas as
-escritas devem passar por esse mecanismo: gravações diretas com credenciais de
-servidor podem violar a consistência. As chaves Base64 das reservas são reversíveis.
+Gravações diretas com credenciais de servidor podem violar a consistência.
+As chaves Base64 das reservas são reversíveis.
 
 ## Validação
 
@@ -272,8 +279,12 @@ documentos existentes permanecem compatíveis.
 
 ## API em inglês e adaptação do domínio
 
-A API genérica de criação é `create(entity)`. Os métodos `save`, `delete`, `get`
-e `getAll` mantêm seus nomes. O hook de tradução de conflitos é
+A API genérica de criação é `create(entity)`. A API oferece `save`, `delete`, `get`
+e `getPage(pageSize, afterId)`. `getAll` foi removido para evitar leituras sem
+limite. Para consultas filtradas, use `queryPage(query, pageSize, afterId)`; para
+um único resultado, `queryOne(query)`. Veja os exemplos de
+[paginação](pagination.md).
+O hook de tradução de conflitos é
 `duplicateValueException(field)` e a exceção genérica oferece `getField()`.
 O contrato existente `UsuarioRepository.cadastrar` é preservado pelo adaptador:
 
@@ -286,5 +297,17 @@ public CompletableFuture<Usuario> cadastrar(Usuario usuario) {
 
 O Javadoc de `FirestoreRepository` está em inglês e descreve os contratos de
 mapeamento, os modos de persistência, as transações, os erros assíncronos, as
-conversões temporais e a inicialização de documentos preexistentes. Pode ser
+conversões temporais e a paginação. Pode ser
 gerado com `./gradlew :data:javadoc`.
+
+## Composição de várias escritas
+
+Use o método protegido `writeTransaction` da classe base. Dentro do planejador,
+use exclusivamente `writes.create(repository, entity)`, `writes.save(...)` e
+`writes.delete(...)` para que documentos e reservas componham a mesma transação.
+O cadastro unitário com campos únicos também usa essa infraestrutura.
+
+O planejador executa uma vez; a execução Firestore pode repetir com leituras e
+reservas novas. Não dispare escritas assíncronas independentes nem compartilhe o
+plano entre threads. Leia [o guia de transações com vários documentos](multi-document-transactions.md)
+para exemplos testados, incluindo trocas de emails e rollback entre coleções.

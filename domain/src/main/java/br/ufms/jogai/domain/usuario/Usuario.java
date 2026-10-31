@@ -35,7 +35,7 @@ public class Usuario extends Entidade<UUID> {
         setTelefone(telefone);
         setDataNascimento(dataNascimento);
 
-        this.dataCadastro = Objects.requireNonNull(dataCadastro, "A data de cadastro não pode ser nula");
+        this.dataCadastro = Validar.dataCadastro(dataCadastro);
         this.status = Objects.requireNonNull(status, "O status do usuário não pode ser nulo");
     }
 

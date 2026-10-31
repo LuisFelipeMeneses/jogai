@@ -17,6 +17,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Exercita o fluxo sem campos únicos, inclusive IDs String e valores opcionais. */
@@ -44,7 +46,7 @@ class FirestoreRepositoryTest {
     void permiteValoresRepetidosSemCriarReservasOuControles() throws Exception {
         aguardar(repository.create(new Registro("a", "igual")));
         aguardar(repository.create(new Registro("b", "igual")));
-        assertEquals(2, aguardar(repository.getAll()).size());
+        assertEquals(2, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertSemReservas();
     }
 
@@ -63,7 +65,7 @@ class FirestoreRepositoryTest {
         aguardar(repository.save(new Registro("a", "segundo")));
         assertEquals("segundo", aguardar(repository.get("a")).orElseThrow().valor);
         assertTrue(aguardar(repository.get("inexistente")).isEmpty());
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertEquals("a", aguardar(repository.buscar("segundo")).orElseThrow().getId());
         assertTrue(aguardar(repository.buscar("primeiro")).isEmpty());
         assertSemReservas();
@@ -89,7 +91,7 @@ class FirestoreRepositoryTest {
                 causa(erroA != null ? erroA : erroB)).getField());
         assertEquals(erroA == null ? "primeiro" : "segundo",
                 aguardar(repository.get("a")).orElseThrow().valor);
-        assertEquals(1, aguardar(repository.getAll()).size());
+        assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertSemReservas();
     }
 
@@ -113,7 +115,7 @@ class FirestoreRepositoryTest {
         aguardar(explicito.create(new Registro("a", "igual")));
         aguardar(explicito.create(new Registro("b", "igual")));
         aguardar(explicito.delete("a"));
-        assertEquals(1, aguardar(explicito.getAll()).size());
+        assertEquals(1, aguardar(explicito.getPage(100).thenApply(page -> page.items())).size());
         assertSemReservas();
     }
 
@@ -130,11 +132,16 @@ class FirestoreRepositoryTest {
                 () -> aguardar(invalido.create(new Registro("a", "valor"))));
         assertFalse(causa(erro) instanceof DuplicateUniqueValueException);
         assertTrue(aguardar(repository.get("a")).isEmpty());
+        aguardar(repository.create(new Registro("a", "original")));
+        ExecutionException falhaSave = assertThrows(ExecutionException.class,
+                () -> aguardar(invalido.save(new Registro("a", "substituto"))));
+        assertFalse(causa(falhaSave) instanceof DuplicateUniqueValueException);
+        assertEquals("original", aguardar(repository.get("a")).orElseThrow().valor);
         assertSemReservas();
     }
 
     private void assertSemReservas() throws Exception {
-        assertEquals(0, db.collection("valores_unicos").get().get().size());
+        assertEquals(0, db.collection(COLLECTION_PATH).get().get().size());
         assertEquals(0, db.collection("valores_unicos_controle").get().get().size());
     }
 

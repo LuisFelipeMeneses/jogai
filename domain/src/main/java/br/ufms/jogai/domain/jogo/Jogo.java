@@ -40,10 +40,7 @@ public class Jogo extends Entidade<UUID> {
         setDuracaoPartida(duracaoPartida);
         setDescricao(descricao);
 
-        if (categorias == null || categorias.isEmpty()) {
-            throw new IllegalArgumentException("O jogo deve possuir pelo menos uma categoria");
-        }
-        this.categorias = new HashSet<>(categorias);
+        this.categorias = new HashSet<>(Validar.categoriasJogo(categorias));
         this.ativo = ativo;
     }
 
@@ -103,10 +100,6 @@ public class Jogo extends Entidade<UUID> {
         this.faixaEtaria = faixaEtaria == null ? new FaixaEtaria() : faixaEtaria;
     }
 
-//    public DuracaoPartida getDuracaoPartida() {
-//        return duracaoPartida;
-//    }
-
     public Duration getTempoMinimoEstimado() {
         return duracaoPartida.minima();
     }
@@ -134,9 +127,10 @@ public class Jogo extends Entidade<UUID> {
         if (categorias == null) {
             throw new IllegalArgumentException("As categorias não podem ser nulas");
         }
-        for (CategoriaJogo categoria : categorias) {
-            adicionarCategoria(categoria);
+        if (Arrays.stream(categorias).anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("A categoria não pode ser nula");
         }
+        Collections.addAll(this.categorias, categorias);
     }
 
     public void removerCategoria(CategoriaJogo categoria) {
@@ -247,7 +241,10 @@ public class Jogo extends Entidade<UUID> {
         }
 
         public Builder categorias(CategoriaJogo... categorias) {
-            this.categorias = new HashSet<>(Arrays.stream(categorias).toList());
+            if (categorias == null) {
+                throw new IllegalArgumentException("As categorias não podem ser nulas");
+            }
+            this.categorias = new HashSet<>(Arrays.asList(categorias));
             return this;
         }
 

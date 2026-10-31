@@ -14,11 +14,21 @@ public class Main {
             var repository = new UsuarioFirestoreRepository();
 
             var usuario = Usuario.create(
-                    "Rodolfinho Azevedo",
+                    "Kleber Kruger",
                     "kleberkruger@gmail.com",
                     "67996122809",
                     LocalDate.of(1988, 12, 8)
             );
+
+            repository.getPage(50)
+                    .thenAccept(page -> {
+                        IO.println("Página de usuários cadastrados:");
+                        for (Usuario u : page.items()) {
+                            IO.println("- " + u.getNome());
+                        }
+                        page.nextCursor().ifPresent(cursor -> IO.println("Próximo cursor: " + cursor));
+                    })
+                    .get();
 
             repository.cadastrar(usuario)
                     .thenAccept(u -> IO.println(u.getNome() + " inserido com sucesso"))
@@ -30,25 +40,27 @@ public class Main {
                             () -> IO.println("Usuário não encontrado")
                     )).get();
 
-            repository.getAll()
-                    .thenAccept(usuarios -> {
-                        IO.println("Usuários cadastrados:");
-                        for (Usuario u : usuarios) {
+            repository.getPage(50)
+                    .thenAccept(page -> {
+                        IO.println("Página de usuários cadastrados:");
+                        for (Usuario u : page.items()) {
                             IO.println("- " + u.getNome());
                         }
+                        page.nextCursor().ifPresent(cursor -> IO.println("Próximo cursor: " + cursor));
                     })
                     .get();
 
-            repository.delete(usuario.getId())
-                    .thenAccept(unused -> System.out.println("Usuario deletado com sucesso"))
-                    .get();
+//            repository.delete(usuario.getId())
+//                    .thenAccept(unused -> System.out.println("Usuario deletado com sucesso"))
+//                    .get();
 
-            repository.getAll()
-                    .thenAccept(usuarios -> {
-                        IO.println("Usuários cadastrados:");
-                        for (Usuario u : usuarios) {
+            repository.getPage(50)
+                    .thenAccept(page -> {
+                        IO.println("Página de usuários cadastrados:");
+                        for (Usuario u : page.items()) {
                             IO.println("- " + u.getNome());
                         }
+                        page.nextCursor().ifPresent(cursor -> IO.println("Próximo cursor: " + cursor));
                     })
                     .get();
 

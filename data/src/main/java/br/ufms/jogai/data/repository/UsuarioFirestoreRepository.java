@@ -3,6 +3,7 @@ package br.ufms.jogai.data.repository;
 import br.ufms.jogai.data.firebase.FirestoreRepository;
 import br.ufms.jogai.data.firebase.config.FirebaseConfig;
 import br.ufms.jogai.domain.usuario.StatusUsuario;
+import br.ufms.jogai.domain.shared.Page;
 import br.ufms.jogai.domain.usuario.Usuario;
 import br.ufms.jogai.domain.usuario.UsuarioRepository;
 import br.ufms.jogai.domain.usuario.UsuarioDuplicadoException;
@@ -20,12 +21,23 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     }
 
     public UsuarioFirestoreRepository(Firestore firestore) {
-        super(Objects.requireNonNull(firestore).collection("usuarios"), "usuario", Set.of("email", "telefone"));
+        super(Objects.requireNonNull(firestore).collection("usuarios"), Set.of(
+                "email", "telefone"
+        ));
     }
 
     @Override
     public CompletableFuture<Usuario> cadastrar(Usuario usuario) {
         return create(usuario);
+    }
+
+    /**
+     * Cadastra todos os usuários atomicamente, incluindo suas reservas de email e telefone.
+     */
+    @Override
+    public CompletableFuture<Collection<Usuario>> cadastrarTodos(Collection<Usuario> usuarios) {
+        Objects.requireNonNull(usuarios);
+        return writeTransaction(writes -> usuarios.stream().map(usuario -> writes.create(this, usuario)).toList());
     }
 
     @Override
@@ -59,13 +71,13 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     }
 
     @Override
-    public CompletableFuture<Collection<Usuario>> listarPorNome(String nome) {
+    public CompletableFuture<Page<Usuario, UUID>> listarPorNome(String nome, int pageSize, UUID afterId) {
         Objects.requireNonNull(nome);
 
-        return query(collection
-                .orderBy("nome")
-                .startAt(nome)
-                .endAt(nome + "\uf8ff"));
+        return queryPage(collection
+                .whereGreaterThanOrEqualTo("nome", nome)
+                .whereLessThanOrEqualTo("nome", nome + "\uf8ff")
+                .orderBy("nome"), pageSize, afterId);
     }
 
     @Override
@@ -83,9 +95,9 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
     }
 
     @Override
-    public CompletableFuture<Collection<Usuario>> listarPorStatus(StatusUsuario status) {
+    public CompletableFuture<Page<Usuario, UUID>> listarPorStatus(StatusUsuario status, int pageSize, UUID afterId) {
         Objects.requireNonNull(status);
 
-        return query(collection.whereEqualTo("status", status.name()));
+        return queryPage(collection.whereEqualTo("status", status.name()), pageSize, afterId);
     }
 }

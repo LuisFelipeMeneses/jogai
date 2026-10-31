@@ -1,9 +1,9 @@
 package br.ufms.jogai.data.firebase;
 
 import br.ufms.jogai.data.repository.DuplicateUniqueValueException;
-import br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository;
 import br.ufms.jogai.domain.shared.Entidade;
 import br.ufms.jogai.domain.shared.Repository;
+import br.ufms.jogai.domain.shared.Page;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
@@ -13,15 +13,17 @@ import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.FieldPath;
 import com.google.cloud.firestore.Query;
 import com.google.cloud.firestore.QuerySnapshot;
-import com.google.cloud.firestore.Transaction;
 
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -29,7 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import java.util.concurrent.ForkJoinPool;
 
 /**
@@ -46,10 +48,9 @@ import java.util.concurrent.ForkJoinPool;
  * same entity is allowed; another owner's value rejects the entire write. Updates release changed
  * previous values, and deletion releases the deleted entity's reservations.
  *
- * <p>The first constrained write also initializes reservations for existing documents, reconstructing
- * them through the domain first. Invalid or duplicate legacy data aborts initialization. Large
- * collections require a separately planned migration because transaction limits still apply.
- * Changing normalization, removing constraints, or changing scopes also requires migration.
+ * <p>Collections start empty and all writes must use the same reservation protocol and canonical
+ * field mappings. No initialization, collection scan, or legacy-data migration is performed.
+ * Previously stored unique values are read directly from the persisted fields on update/delete.
  * All writers must follow this reservation protocol; direct privileged writes can bypass it.
  *
  * <p>Database failures complete returned futures exceptionally. Null arguments, mapping failures,
@@ -57,10 +58,14 @@ import java.util.concurrent.ForkJoinPool;
  * supplied {@link Firestore} client. Existing storage names are preserved for compatibility.
  *
  * @param <E>  the domain entity type
- * @param <ID> the entity identifier type; its String representation must be a valid document ID
+ * @param <ID> the entity identifier type; its String representation must be a single document ID,
+ *             never a relative path containing slashes
  */
 public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Serializable>
         implements Repository<E, ID> {
+
+    /** Maximum number of entities returned by a page. */
+    public static final int MAX_PAGE_SIZE = 200;
 
     /**
      * Shared Firestore client owned by the application.
@@ -74,8 +79,6 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
 
     private final String scope;
     private final Set<String> uniqueFields;
-    private final UniqueValuesFirestoreRepository uniqueValues;
-    private final DocumentReference initializationMarker;
 
     /**
      * Creates a repository without unique-field constraints.
@@ -83,7 +86,17 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
      * @param collection the non-null entity collection
      */
     protected FirestoreRepository(CollectionReference collection) {
-        this(collection, Objects.requireNonNull(collection, "Collection must not be null").getPath(), Set.of());
+        this(collection, Set.of());
+    }
+
+    /**
+     * Creates a repository whose unique values are scoped to the full collection path.
+     * This also isolates identically named subcollections under different parent documents.
+     * @param collection the root collection or subcollection managed by this repository
+     * @param uniqueFields required canonical String fields, unique within this collection
+     */
+    protected FirestoreRepository(CollectionReference collection, Set<String> uniqueFields) {
+        this(collection, Objects.requireNonNull(collection, "Collection must not be null").getPath(), uniqueFields);
     }
 
     /**
@@ -107,8 +120,9 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
             throw new IllegalArgumentException("Scope must not be blank");
         }
         this.uniqueFields = Set.copyOf(Objects.requireNonNull(uniqueFields, "Unique fields must not be null"));
-        this.uniqueValues = new UniqueValuesFirestoreRepository(db);
-        this.initializationMarker = uniqueValues.initializationMarker(collection.getPath(), scope, this.uniqueFields);
+        for (String field : this.uniqueFields) {
+            if (field.isBlank()) throw new IllegalArgumentException("Unique field names must not be blank");
+        }
     }
 
     /**
@@ -137,87 +151,98 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
     }
 
     private CompletableFuture<E> persist(E entity, boolean createOnly) {
-        Objects.requireNonNull(entity, "Entity must not be null");
-        String id = idToStr(entity.getId());
-        // Capture once so every transaction attempt uses the same canonical values.
-        Map<String, Object> capturedData = captureEntityData(entity);
-        Map<String, String> currentValues = extractUniqueValues(capturedData);
-        E resultEntity = mapToEntity(id, capturedData);
-        DocumentReference reference = collection.document(id);
-
+        var captured = capture(entity);
         if (uniqueFields.isEmpty()) {
-            // create enforces ID absence atomically; no preliminary read is needed.
-            var write = createOnly ? reference.create(capturedData) : reference.set(capturedData);
-            return toCompletableFuture(write)
-                    .exceptionallyCompose(error -> CompletableFuture.failedFuture(
-                            createOnly && error instanceof AlreadyExistsException ? duplicateValueException("id") : error))
-                    .thenApply(result -> resultEntity);
+            var write = createOnly ? captured.reference().create(captured.data()) : captured.reference().set(captured.data());
+            var persisted = toCompletableFuture(write);
+            if (createOnly) {
+                persisted = persisted.exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        error instanceof AlreadyExistsException ? duplicateValueException("id") : error));
+            }
+            return persisted.thenApply(result -> captured.entity());
         }
+        return writeTransaction(writes -> writes.addCaptured(this, captured, createOnly));
+    }
 
+    /**
+     * Plans and commits multiple repository writes in one Firestore transaction.
+     *
+     * <p>The planner runs once, synchronously, to capture data; database retries do not rerun it.
+     * Use its create/save/delete methods instead of invoking asynchronous repository writes inside
+     * the planner. All participating repositories must share this Firestore client. Each document
+     * may be changed only once per plan. No database reads or writes happen during planning.
+     *
+     * <p>Execution reads required documents, prepares shared unique reservations, then applies
+     * every document and reservation together. Changed values may be transferred or swapped between
+     * participating entities if the final state is unique. Any conflict or commit failure rejects
+     * the whole plan. Empty plans complete without database access. Collections and subcollections
+     * can participate together; construct a repository for each full collection path.
+     * Deleting a parent does not implicitly delete its descendants: plan each child deletion.
+     *
+     * @param planner callback that prepares writes and returns the result to publish after commit
+     * @param <R>     result type
+     * @return a future completed only after all writes commit, or exceptionally on failure
+     */
+    protected final <R> CompletableFuture<R> writeTransaction(Function<RepositoryWriteTransaction, R> planner) {
+        Objects.requireNonNull(planner, "Transaction planner must not be null");
+        var writes = new RepositoryWriteTransaction(db);
+        R result;
+        try {
+            result = planner.apply(writes);
+            writes.seal();
+        } catch (RuntimeException | Error failure) {
+            writes.discard();
+            throw failure;
+        }
+        if (writes.isEmpty()) return CompletableFuture.completedFuture(result);
         return toCompletableFuture(db.runTransaction(transaction -> {
-            var previous = transaction.get(reference).get();
-            if (createOnly && previous.exists()) {
-                throw duplicateValueException("id");
-            }
-            var reservations = uniqueValues.inTransaction(transaction);
-            boolean initialize;
-            try {
-                initialize = prepareInitialization(transaction, reservations);
-                reservations.replace(scope, id, previous.exists() ?
-                        extractUniqueValues(previous) : Map.of(), currentValues);
-            } catch (DuplicateUniqueValueException conflict) {
-                throw duplicateValueException(conflict.getField());
-            }
-            // All reads are complete. Reservations and entity data share one commit.
-            reservations.apply();
-            if (initialize) {
-                // Retain existing stored field names; changing the API requires no data migration.
-                transaction.set(initializationMarker, Map.of("colecao", collection.getPath(), "escopo", scope));
-            }
-            transaction.set(reference, capturedData);
-            return resultEntity;
+            writes.execute(transaction);
+            return result;
         }));
+    }
+
+    record CapturedEntity<E>(DocumentReference reference, Map<String, Object> data,
+                             Map<String, String> uniqueValues, E entity) {
+    }
+
+    final CapturedEntity<E> capture(E entity) {
+        Objects.requireNonNull(entity, "Entity must not be null");
+        var reference = documentReference(entity.getId());
+        String id = reference.getId();
+        Map<String, Object> data = captureEntityData(entity);
+        E result = Objects.requireNonNull(mapToEntity(id, data), "Entity mapper must not return null");
+        if (!id.equals(idToStr(result.getId()))) {
+            throw new IllegalArgumentException("Entity mapper must preserve the document ID");
+        }
+        return new CapturedEntity<>(reference, data, extractUniqueValues(data), result);
+    }
+
+    final String uniqueScope() {
+        return scope;
+    }
+
+    final Set<String> uniqueFields() {
+        return uniqueFields;
     }
 
     /**
      * Deletes a document and releases its owned unique values, atomically when constraints exist.
      *
-     * <p>Deleting a missing document succeeds without effect. Legacy documents with constraints
-     * are reconstructed through the domain before their reservation keys are determined.
+     * <p>Deleting a missing document succeeds without effect. Previous unique values are read
+     * directly from the persisted canonical fields, without reconstructing the entity.
      *
      * @param id the non-null document identifier
      * @return a future completed when deletion succeeds
      */
     @Override
     public final CompletableFuture<Void> delete(ID id) {
-        String entityId = idToStr(id);
-        DocumentReference reference = collection.document(entityId);
         if (uniqueFields.isEmpty()) {
-            return toCompletableFuture(reference.delete()).thenApply(result -> null);
+            return toCompletableFuture(documentReference(id).delete()).thenApply(result -> null);
         }
-        return toCompletableFuture(db.runTransaction(transaction -> {
-            var document = transaction.get(reference).get();
-            if (!document.exists()) {
-                return null;
-            }
-            var reservations = uniqueValues.inTransaction(transaction);
-            reservations.replace(scope, entityId, extractUniqueValues(document), Map.of());
-            reservations.apply();
-            transaction.delete(reference);
+        return writeTransaction(writes -> {
+            writes.delete(this, id);
             return null;
-        }));
-    }
-
-    private boolean prepareInitialization(Transaction transaction, UniqueValuesFirestoreRepository.Operation reservations)
-            throws ExecutionException, InterruptedException {
-        if (transaction.get(initializationMarker).get().exists()) {
-            return false;
-        }
-        // Prepare every reservation before scheduling any writes, including the marker itself.
-        for (var document : transaction.get(collection).get().getDocuments()) {
-            reservations.replace(scope, document.getId(), Map.of(), extractUniqueValues(document));
-        }
-        return true;
+        });
     }
 
     private Map<String, Object> captureEntityData(E entity) {
@@ -225,14 +250,14 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
         for (Object value : data.values()) {
             if (value == null) {
                 // Map.copyOf rejects nulls; preserve optional fields with a defensive snapshot.
-                return Map.copyOf(data);
+                return Collections.unmodifiableMap(new HashMap<>(data));
             }
         }
         // The JDK can reuse an immutable source map; mutable maps are defensively copied.
         return Map.copyOf(data);
     }
 
-    private Map<String, String> extractUniqueValues(Map<String, Object> data) {
+    final Map<String, String> extractUniqueValues(Map<String, Object> data) {
         if (uniqueFields.isEmpty()) return Map.of();
         Map<String, String> values = HashMap.newHashMap(uniqueFields.size());
         uniqueFields.forEach(field -> {
@@ -243,11 +268,6 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
         });
         // This map stays private to the persistence flow; no second copy is needed.
         return values;
-    }
-
-    private Map<String, String> extractUniqueValues(DocumentSnapshot document) {
-        // Reconstruct legacy data through the domain to obtain its canonical values.
-        return extractUniqueValues(entityToMap(documentToEntity(document)));
     }
 
     /**
@@ -272,28 +292,58 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
      */
     @Override
     public CompletableFuture<Optional<E>> get(ID id) {
-        return get(collection.document(idToStr(id)));
+        return get(documentReference(id));
     }
 
     /**
-     * Loads all documents in the configured collection; this operation is not paginated.
-     *
-     * @return all reconstructed entities
+     * Loads a bounded page in document-ID order. The cursor remains usable if its document is deleted.
+     * @param pageSize maximum entities returned, from 1 to MAX_PAGE_SIZE
+     * @param afterId exclusive document-ID cursor, or null for the first page
+     * @return entities and an optional cursor, based on one extra look-ahead document
      */
     @Override
-    public CompletableFuture<Collection<E>> getAll() {
-        return query(collection);
+    public final CompletableFuture<Page<E, ID>> getPage(int pageSize, ID afterId) {
+        validateLimit(pageSize, MAX_PAGE_SIZE);
+        Query query = collection.orderBy(FieldPath.documentId());
+        if (afterId != null) query = query.startAfter(documentReference(afterId).getId());
+        return readPage(query, pageSize);
     }
 
     /**
-     * Executes a query and reconstructs its results.
-     *
-     * @param query the non-null Firestore query, including any desired ordering or limits
-     * @return the matching entities
+     * Executes one bounded page of a filtered or ordered query.
+     * @param query query filters and ordering; do not supply a conflicting start cursor
+     * @param pageSize maximum returned entities, from 1 to MAX_PAGE_SIZE
+     * @param afterId ID of the last returned entity from the same query, or null
+     * @return the bounded page; a missing cursor document fails instead of restarting pagination
+     * <p>Ordered queries use a snapshot cursor, requiring one extra document read after the first
+     * page. Pagination is not a frozen database snapshot; concurrent edits can change later pages.
      */
-    protected CompletableFuture<Collection<E>> query(Query query) {
+    protected final CompletableFuture<Page<E, ID>> queryPage(Query query, int pageSize, ID afterId) {
         Objects.requireNonNull(query, "Query must not be null");
-        return toCompletableFuture(query.get()).thenApply(this::documentsToEntities);
+        validateLimit(pageSize, MAX_PAGE_SIZE);
+        if (afterId == null) return readPage(query, pageSize);
+        return toCompletableFuture(documentReference(afterId).get()).thenCompose(cursor -> {
+            if (!cursor.exists()) throw new IllegalArgumentException("Page cursor document no longer exists");
+            return readPage(query.startAfter(cursor), pageSize);
+        });
+    }
+
+    private CompletableFuture<Page<E, ID>> readPage(Query query, int pageSize) {
+        return toCompletableFuture(query.limit(pageSize + 1).get()).thenApply(snapshot -> {
+            var documents = snapshot.getDocuments();
+            int count = Math.min(pageSize, documents.size());
+            var items = new ArrayList<E>(count);
+            for (int i = 0; i < count; i++) items.add(documentToEntity(documents.get(i)));
+            Optional<ID> next = documents.size() > pageSize
+                    ? Optional.of(items.getLast().getId()) : Optional.empty();
+            return new Page<>(items, next);
+        });
+    }
+
+    private static void validateLimit(int limit, int maximum) {
+        if (limit < 1 || limit > maximum) {
+            throw new IllegalArgumentException("Limit must be between 1 and " + maximum);
+        }
     }
 
     /**
@@ -340,6 +390,16 @@ public abstract class FirestoreRepository<E extends Entidade<ID>, ID extends Ser
      */
     protected String idToStr(ID id) {
         return String.valueOf(Objects.requireNonNull(id, "ID must not be null"));
+    }
+
+    // IDs identify direct children only. Relative paths would escape the configured collection
+    // and make distinct documents with the same leaf ID appear to own the same reservation.
+    final DocumentReference documentReference(ID id) {
+        String value = Objects.requireNonNull(idToStr(id), "Mapped ID must not be null");
+        if (value.isEmpty() || value.indexOf('/') >= 0) {
+            throw new IllegalArgumentException("ID must be a single document name, not a relative path");
+        }
+        return collection.document(value);
     }
 
     /**

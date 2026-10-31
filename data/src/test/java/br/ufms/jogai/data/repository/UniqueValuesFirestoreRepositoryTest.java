@@ -11,6 +11,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import static br.ufms.jogai.data.repository.UniqueValuesFirestoreRepository.COLLECTION_PATH;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "FIRESTORE_EMULATOR_HOST", matches = ".+")
@@ -45,7 +47,7 @@ class UniqueValuesFirestoreRepositoryTest {
             reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
-        assertEquals(5, db.collection("valores_unicos").get().get().size());
+        assertEquals(5, db.collection(COLLECTION_PATH).get().get().size());
     }
 
     @Test
@@ -62,7 +64,7 @@ class UniqueValuesFirestoreRepositoryTest {
         Throwable causa = erro;
         while (causa.getCause() != null) causa = causa.getCause();
         assertInstanceOf(DuplicateUniqueValueException.class, causa);
-        assertEquals(0, db.collection("valores_unicos").get().get().size());
+        assertEquals(0, db.collection(COLLECTION_PATH).get().get().size());
     }
 
     @Test
@@ -79,7 +81,7 @@ class UniqueValuesFirestoreRepositoryTest {
             reservas.apply();
             return null;
         }).get(45, TimeUnit.SECONDS);
-        var reservas = db.collection("valores_unicos").get().get().getDocuments();
+        var reservas = db.collection(COLLECTION_PATH).get().get().getDocuments();
         assertEquals(1, reservas.size());
         assertEquals("1", reservas.getFirst().getString("entidadeId"));
     }
@@ -104,10 +106,42 @@ class UniqueValuesFirestoreRepositoryTest {
             return null;
         }).get(45, TimeUnit.SECONDS);
 
-        var reservas = db.collection("valores_unicos").get().get().getDocuments();
+        var reservas = db.collection(COLLECTION_PATH).get().get().getDocuments();
         assertEquals(1, reservas.size());
         assertEquals("email", reservas.getFirst().getString("campo"));
         assertEquals("1", reservas.getFirst().getString("entidadeId"));
+    }
+
+    @Test
+    void transferenciaRequerLiberacaoDoProprietarioEIgnoraLiberacaoAntigaRepetida() throws Exception {
+        db.runTransaction(transaction -> {
+            var operation = valores.inTransaction(transaction);
+            operation.reserve("usuario", "email", "a@example.com", "1");
+            operation.apply();
+            return null;
+        }).get(45, TimeUnit.SECONDS);
+        var unauthorized = db.runTransaction(transaction -> {
+            var operation = valores.inTransaction(transaction);
+            operation.release("usuario", "email", "a@example.com", "other");
+            operation.reserve("usuario", "email", "a@example.com", "2");
+            operation.apply();
+            return null;
+        });
+        assertThrows(ExecutionException.class, () -> unauthorized.get(45, TimeUnit.SECONDS));
+        db.runTransaction(transaction -> {
+            var operation = valores.inTransaction(transaction);
+            operation.release("usuario", "email", "a@example.com", "1");
+            operation.reserve("usuario", "email", "a@example.com", "2");
+            // This stale release must not erase the pending new owner's claim.
+            operation.release("usuario", "email", "a@example.com", "1");
+            assertThrows(DuplicateUniqueValueException.class,
+                    () -> operation.reserve("usuario", "email", "a@example.com", "3"));
+            operation.apply();
+            return null;
+        }).get(45, TimeUnit.SECONDS);
+        var reservations = db.collection(COLLECTION_PATH).get().get().getDocuments();
+        assertEquals(1, reservations.size());
+        assertEquals("2", reservations.getFirst().getString("entidadeId"));
     }
 
     @Test
@@ -121,6 +155,6 @@ class UniqueValuesFirestoreRepositoryTest {
             assertThrows(IllegalStateException.class, reservas::apply);
             return null;
         }).get(45, TimeUnit.SECONDS);
-        assertEquals(1, db.collection("valores_unicos").get().get().size());
+        assertEquals(1, db.collection(COLLECTION_PATH).get().get().size());
     }
 }
