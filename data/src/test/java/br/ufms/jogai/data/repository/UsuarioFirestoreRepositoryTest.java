@@ -70,16 +70,16 @@ class UsuarioFirestoreRepositoryTest {
 
     @Test
     void rejeitaEmailDuplicadoSemDiferenciarMaiusculas() throws Exception {
-        aguardar(repository.cadastrar(usuario("Pessoa@Example.com", "67996122809")));
-        duplicado("email", repository.cadastrar(usuario("pessoa@example.com", "67996122810")));
+        aguardar(repository.create(usuario("Pessoa@Example.com", "67996122809")));
+        duplicado("email", repository.create(usuario("pessoa@example.com", "67996122810")));
         assertEquals(1, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
         assertEquals(1, quantidadeReservas("telefone"));
     }
 
     @Test
     void rejeitaTelefoneDuplicadoEmOutroFormato() throws Exception {
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
-        duplicado("telefone", repository.cadastrar(usuario("b@example.com", "+55 67 99612-2809")));
+        aguardar(repository.create(usuario("a@example.com", "67996122809")));
+        duplicado("telefone", repository.create(usuario("b@example.com", "+55 67 99612-2809")));
         assertEquals(1, quantidadeReservas("email"));
     }
 
@@ -92,15 +92,15 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void cadastrarNaoSobrescreveIdExistente() throws Exception {
         Usuario usuario = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(usuario));
-        duplicado("id", repository.cadastrar(usuario));
+        aguardar(repository.create(usuario));
+        duplicado("id", repository.create(usuario));
         aguardar(repository.save(usuario));
     }
 
     @Test
     void reservaSemProprietarioNaoEhConfundidaComDocumentoAusenteNaLeituraProjetada() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         var email = db.collection(COLLECTION_PATH).whereEqualTo("campo", "email")
                 .get().get().getDocuments().getFirst();
         email.getReference().update("entidadeId", com.google.cloud.firestore.FieldValue.delete()).get();
@@ -114,11 +114,11 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void variosCadastrosConcorrentesNaoDuplicamEmailNemDeixamReservasOrfas() throws Exception {
         Usuario inicial = usuario("inicial@example.com", "67996122819");
-        aguardar(repository.cadastrar(inicial));
+        aguardar(repository.create(inicial));
         aguardar(repository.delete(inicial.getId()));
         var resultados = new java.util.ArrayList<CompletableFuture<Throwable>>();
         for (int i = 0; i < 6; i++) {
-            resultados.add(repository.cadastrar(usuario("disputa@example.com", "6799612280" + i))
+            resultados.add(repository.create(usuario("disputa@example.com", "6799612280" + i))
                     .handle((usuario, erro) -> erro));
         }
         int concluidos = 0;
@@ -135,7 +135,7 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void alterarSomenteNomeNaoRegravaReservas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         var reservasAntes = db.collection(COLLECTION_PATH).get().get().getDocuments();
 
         a.setNome("Outro Nome");
@@ -152,69 +152,89 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void alterarEmailNaoRegravaReservaDoTelefone() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         var telefoneAntes = db.collection(COLLECTION_PATH).whereEqualTo("campo", "telefone")
                 .get().get().getDocuments().getFirst();
         a.setEmail("novo@example.com");
         aguardar(repository.save(a));
         assertEquals(telefoneAntes.getUpdateTime(), telefoneAntes.getReference().get().get().getUpdateTime());
         assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122810")));
+        aguardar(repository.create(usuario("a@example.com", "67996122810")));
     }
 
     @Test
     void salvarValorInalteradoAindaRecriaReservaAusente() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create(a));
         var telefone = db.collection(COLLECTION_PATH).whereEqualTo("campo", "telefone")
                 .get().get().getDocuments().getFirst();
         telefone.getReference().delete().get();
         aguardar(repository.save(a));
         assertReservasConsistentes();
-        duplicado("telefone", repository.cadastrar(usuario("b@example.com", "67996122809")));
+        duplicado("telefone", repository.create(usuario("b@example.com", "67996122809")));
     }
 
     @Test
     void atualizacaoLiberaReservasAnteriores() throws Exception {
         Usuario usuario = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(usuario));
+        aguardar(repository.create
+
+(usuario));
         usuario.setEmail("b@example.com");
         usuario.setTelefone("67996122810");
         aguardar(repository.save(usuario));
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
+        aguardar(repository.create
+
+(usuario("a@example.com", "67996122809")));
         assertEquals(2, aguardar(repository.getPage(100).thenApply(page -> page.items())).size());
-        duplicado("email", repository.cadastrar(usuario("b@example.com", "67996122811")));
+        duplicado("email", repository.create
+
+(usuario("b@example.com", "67996122811")));
     }
 
     @Test
     void atualizacaoComConflitoPreservaUsuarioEReservas() throws Exception {
         Usuario primeiro = usuario("a@example.com", "67996122809");
         Usuario segundo = usuario("b@example.com", "67996122810");
-        aguardar(repository.cadastrar(primeiro));
-        aguardar(repository.cadastrar(segundo));
+        aguardar(repository.create
+
+(primeiro));
+        aguardar(repository.create
+
+(segundo));
         segundo.setEmail(primeiro.getEmail());
         segundo.setTelefone("67996122811");
         duplicado("email", repository.save(segundo));
         assertEquals("b@example.com", aguardar(repository.get(segundo.getId())).orElseThrow().getEmail());
-        duplicado("telefone", repository.cadastrar(usuario("c@example.com", "67996122810")));
-        aguardar(repository.cadastrar(usuario("c@example.com", "67996122811")));
+        duplicado("telefone", repository.create
+
+(usuario("c@example.com", "67996122810")));
+        aguardar(repository.create
+
+(usuario("c@example.com", "67996122811")));
     }
 
     @Test
     void exclusaoLiberaReservas() throws Exception {
         Usuario usuario = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(usuario));
+        aguardar(repository.create
+
+(usuario));
         aguardar(repository.delete(usuario.getId()));
         aguardar(repository.delete(usuario.getId()));
         assertEquals(0, quantidadeReservas("email"));
         assertEquals(0, quantidadeReservas("telefone"));
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
+        aguardar(repository.create
+
+(usuario("a@example.com", "67996122809")));
     }
 
     @Test
     void consultasUsamAsMesmasRegrasDoDominioParaEntradasNaoNormalizadas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create
+
+(a));
         assertEquals(a.getId(), aguardar(repository.buscarPorEmail(" A@Example.com ")).orElseThrow().getId());
         assertEquals(a.getId(), aguardar(repository.buscarPorTelefone("(67) 99612-2809")).orElseThrow().getId());
     }
@@ -222,7 +242,9 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void concorrenciaContinuaProtegidaAposExcluirTodosOsUsuarios() throws Exception {
         Usuario inicial = usuario("inicial@example.com", "67996122811");
-        aguardar(repository.cadastrar(inicial));
+        aguardar(repository.create
+
+(inicial));
         aguardar(repository.delete(inicial.getId()));
         verificarConcorrencia("email",
                 usuario("a@example.com", "67996122809"),
@@ -247,8 +269,12 @@ class UsuarioFirestoreRepositoryTest {
     void atualizacaoComTelefoneOcupadoNaoReservaNovoEmailNemLiberaValoresAntigos() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         Usuario b = usuario("b@example.com", "67996122810");
-        aguardar(repository.cadastrar(a));
-        aguardar(repository.cadastrar(b));
+        aguardar(repository.create
+
+(a));
+        aguardar(repository.create
+
+(b));
         b.setEmail("novo@example.com");
         b.setTelefone(a.getTelefone());
         duplicado("telefone", repository.save(b));
@@ -256,15 +282,23 @@ class UsuarioFirestoreRepositoryTest {
         assertEquals("b@example.com", persistido.getEmail());
         assertEquals("67996122810", persistido.getTelefone());
         assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("novo@example.com", "67996122811")));
-        duplicado("email", repository.cadastrar(usuario("b@example.com", "67996122812")));
-        duplicado("telefone", repository.cadastrar(usuario("livre@example.com", "67996122810")));
+        aguardar(repository.create
+
+(usuario("novo@example.com", "67996122811")));
+        duplicado("email", repository.create
+
+(usuario("b@example.com", "67996122812")));
+        duplicado("telefone", repository.create
+
+(usuario("livre@example.com", "67996122810")));
     }
 
     @Test
     void permiteAlterarSomenteEmailOuSomenteTelefoneEManterOsPropriosValores() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create
+
+(a));
         a.setEmail("novo@example.com");
         aguardar(repository.save(a));
         assertReservasConsistentes();
@@ -276,7 +310,9 @@ class UsuarioFirestoreRepositoryTest {
         aguardar(repository.save(a));
         assertEquals("Outro Nome", aguardar(repository.get(a.getId())).orElseThrow().getNome());
         assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("a@example.com", "67996122809")));
+        aguardar(repository.create
+
+(usuario("a@example.com", "67996122809")));
     }
 
     @Test
@@ -292,8 +328,12 @@ class UsuarioFirestoreRepositoryTest {
     private void verificarAtualizacoesConcorrentes(String campo) throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
         Usuario b = usuario("b@example.com", "67996122810");
-        aguardar(repository.cadastrar(a));
-        aguardar(repository.cadastrar(b));
+        aguardar(repository.create
+
+(a));
+        aguardar(repository.create
+
+(b));
         if (campo.equals("email")) {
             a.setEmail("disputa@example.com");
             b.setEmail("disputa@example.com");
@@ -311,10 +351,14 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void cadastroEAtualizacaoDisputandoEmailTemApenasUmVencedor() throws Exception {
         Usuario existente = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(existente));
+        aguardar(repository.create
+
+(existente));
         existente.setEmail("disputa@example.com");
         var alteracao = repository.save(existente).handle((usuario, erro) -> erro);
-        var cadastro = repository.cadastrar(usuario("disputa@example.com", "67996122810"))
+        var cadastro = repository.create
+
+(usuario("disputa@example.com", "67996122810"))
                 .handle((usuario, erro) -> erro);
         apenasUmVencedor("email", aguardar(alteracao), aguardar(cadastro));
         assertReservasConsistentes();
@@ -323,7 +367,9 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void atualizacoesConcorrentesDoMesmoUsuarioNaoDeixamReservasOrfas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create
+
+(a));
         Usuario b = aguardar(repository.get(a.getId())).orElseThrow();
         a.setEmail("primeiro@example.com");
         a.setTelefone("67996122810");
@@ -340,7 +386,9 @@ class UsuarioFirestoreRepositoryTest {
     @Test
     void falhaAposAgendarEscritasDesfazUsuarioEReservas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create
+
+(a));
         var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
             var reservas = valores.inTransaction(transaction);
@@ -354,13 +402,17 @@ class UsuarioFirestoreRepositoryTest {
         assertInstanceOf(IllegalStateException.class, causa(erro));
         assertEquals(a.getEmail(), aguardar(repository.get(a.getId())).orElseThrow().getEmail());
         assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("novo@example.com", "67996122810")));
+        aguardar(repository.create
+
+(usuario("novo@example.com", "67996122810")));
     }
 
     @Test
     void falhaNoCommitNaoAplicaNenhumaDasEscritas() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        aguardar(repository.cadastrar(a));
+        aguardar(repository.create
+
+(a));
         var valores = new UniqueValuesFirestoreRepository(db);
         var falha = db.runTransaction(transaction -> {
             var reservas = valores.inTransaction(transaction);
@@ -375,13 +427,17 @@ class UsuarioFirestoreRepositoryTest {
         assertThrows(java.util.concurrent.ExecutionException.class, () -> falha.get(45, TimeUnit.SECONDS));
         assertEquals(a.getEmail(), aguardar(repository.get(a.getId())).orElseThrow().getEmail());
         assertReservasConsistentes();
-        aguardar(repository.cadastrar(usuario("novo@example.com", "67996122810")));
+        aguardar(repository.create
+
+(usuario("novo@example.com", "67996122810")));
     }
 
     @Test
     void alterarObjetoAposIniciarCadastroNaoMudaOsDadosDaOperacao() throws Exception {
         Usuario a = usuario("a@example.com", "67996122809");
-        var cadastro = repository.cadastrar(a);
+        var cadastro = repository.create
+
+(a);
         a.setEmail("outro@example.com");
         a.setTelefone("67996122810");
         Usuario resultado = aguardar(cadastro);
@@ -424,8 +480,12 @@ class UsuarioFirestoreRepositoryTest {
     }
 
     private void verificarConcorrencia(String campo, Usuario a, Usuario b) throws Exception {
-        var primeiro = repository.cadastrar(a);
-        var segundo = repository.cadastrar(b);
+        var primeiro = repository.create
+
+(a);
+        var segundo = repository.create
+
+(b);
         var resultadoA = primeiro.handle((usuario, erro) -> erro);
         var resultadoB = segundo.handle((usuario, erro) -> erro);
         Throwable erroA = aguardar(resultadoA);

@@ -3,17 +3,18 @@ package br.ufms.jogai.data.model;
 import br.ufms.jogai.domain.shared.Entidade;
 import com.google.cloud.Timestamp;
 
+import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Map;
 import java.util.Objects;
 
-public interface EntityDocument<E extends Entidade<?>> {
+public interface EntityDocument<E extends Entidade<? extends Serializable>> {
 
     E toEntity();
 
-    Map<String, Object> toMap();
+//    Map<String, Object> toMap();
 
     static Timestamp toTimestamp(Instant instant) {
         Objects.requireNonNull(instant);
@@ -45,5 +46,11 @@ public interface EntityDocument<E extends Entidade<?>> {
         return toInstant(timestamp)
                 .atZone(ZoneOffset.UTC)
                 .toLocalDate();
+    }
+
+    static LocalDateTime toLocalDateTime(Timestamp timestamp) {
+        return toInstant(timestamp)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDateTime();
     }
 }
