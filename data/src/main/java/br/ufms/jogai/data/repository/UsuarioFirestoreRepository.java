@@ -24,9 +24,6 @@ public class UsuarioFirestoreRepository extends FirestoreRepository<Usuario, UUI
         super(Objects.requireNonNull(firestore).collection("usuarios"), Set.of("email", "telefone"));
     }
 
-    /**
-     * Cadastra todos os usuários atomicamente, incluindo suas reservas de email e telefone.
-     */
     public CompletableFuture<Collection<Usuario>> cadastrarTodos(Collection<Usuario> usuarios) {
         Objects.requireNonNull(usuarios);
         return writeTransaction(writes -> usuarios.stream().map(usuario -> writes.create(this, usuario)).toList());

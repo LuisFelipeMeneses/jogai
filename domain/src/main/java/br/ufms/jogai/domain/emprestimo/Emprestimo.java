@@ -19,11 +19,48 @@ public class Emprestimo extends Entidade<UUID> {
 
     private Collection<ItemEmprestimo> itens;
 
-    protected Emprestimo(UUID uuid) {
+    public Emprestimo(UUID uuid, UsuarioInfo proprietario, UsuarioInfo tomador, LocalDateTime dataEmprestimo, LocalDate dataDevolucao, Collection<ItemEmprestimo> itens) {
         super(uuid);
+        this.proprietario = proprietario;
+        this.tomador = tomador;
+        this.dataEmprestimo = dataEmprestimo;
+        this.dataDevolucao = dataDevolucao;
+        this.itens = itens;
+    }
+
+    public UsuarioInfo getProprietario() {
+        return proprietario;
+    }
+
+    public UsuarioInfo getTomador() {
+        return tomador;
+    }
+
+    public LocalDate getDataDevolucao() {
+        return dataDevolucao;
+    }
+
+    public LocalDateTime getDataEmprestimo() {
+        return dataEmprestimo;
+    }
+
+    public Collection<ItemEmprestimo> getItens() {
+        return itens;
+    }
+
+    public void addItem(ItemEmprestimo item) {
+        itens.add(item);
+    }
+
+    public void removeItem(ItemEmprestimo item) {
+        itens.remove(item);
+    }
+
+    public static Emprestimo create(UsuarioInfo proprietario, UsuarioInfo tomador, LocalDateTime dataEmprestimo, LocalDate dataDevolucao, Collection<ItemEmprestimo> itens) {
+        return new Emprestimo(UUID.randomUUID(), proprietario, tomador, dataEmprestimo, dataDevolucao, itens);
     }
 
     public void adicionarItem(Exemplar exemplar) {
-
+        itens.add(ItemEmprestimo.create(exemplar));
     }
 }
